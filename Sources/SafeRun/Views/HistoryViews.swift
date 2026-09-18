@@ -72,7 +72,9 @@ struct RollbacksView: View {
                             Text(transaction.journal.rootFolder.path).font(.caption).textSelection(.enabled)
                             if let failure = transaction.failure { Text(failure).font(.callout) }
                             ForEach(transaction.entries, id: \.action.id) { entry in
-                                Text("\(entry.action.description) — \(entry.phase.rawValue)\(entry.failure.map { ": " + $0 } ?? "")")
+                                let failureSuffix = entry.failure.map { ": \($0)" } ?? ""
+                                let entrySummary = "\(entry.action.description) — \(entry.phase.rawValue)\(failureSuffix)"
+                                Text(entrySummary)
                                     .font(.caption).textSelection(.enabled)
                             }
                             Button("Attempt Recovery") { transactionToRecover = transaction }
