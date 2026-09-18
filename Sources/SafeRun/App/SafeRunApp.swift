@@ -12,7 +12,9 @@ struct SafeRunApp: App {
                 .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
                 .frame(minWidth: 1_080, minHeight: 700)
         }
-        .windowResizability(.contentSize)
+        .defaultSize(width: 1_280, height: 820)
+        .windowResizability(.contentMinSize)
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Choose Folder") {

@@ -11,6 +11,7 @@ final class SafeRunViewModel: ObservableObject {
     @Published var plan: SafeRunPlan?
     @Published var simulationResult: SimulationResult?
     @Published var selectedActionID: UUID?
+    @Published var isActionInspectorPresented = false
     @Published var historyItems: [RunHistoryItem] = []
     @Published var isScanning = false
     @Published var isAnalyzing = false
@@ -20,6 +21,7 @@ final class SafeRunViewModel: ObservableObject {
     private let scanner = FolderContextScanner()
     private let planner = MockAutomationPlanner()
     private let simulationEngine = SimulationEngine()
+    private let executionEngine = SafeExecutionEngine()
     private let historyStore = RunHistoryStore()
     private var folderAccessURL: URL?
     private var scanTask: Task<Void, Never>?
@@ -32,7 +34,10 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     var canAnalyze: Bool {
-        selectedFolder != nil && !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isAnalyzing
+        folderContext != nil
+            && !isScanning
+            && !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isAnalyzing
     }
 
     var selectedAction: SafeRunAction? {
@@ -69,6 +74,8 @@ final class SafeRunViewModel: ObservableObject {
         folderContext = nil
         plan = nil
         simulationResult = nil
+        selectedActionID = nil
+        isActionInspectorPresented = false
         errorMessage = nil
         scanTask?.cancel()
         isScanning = true
@@ -101,6 +108,7 @@ final class SafeRunViewModel: ObservableObject {
         isAnalyzing = true
         simulationResult = nil
         selectedActionID = nil
+        isActionInspectorPresented = false
 
         Task { [weak self] in
             guard let self else { return }
@@ -145,6 +153,47 @@ final class SafeRunViewModel: ObservableObject {
     func openSimulation(_ item: RunHistoryItem) {
         acceptFolder(item.selectedDirectory)
         instruction = item.instruction
+        selectedSection = .dashboard
+    }
+
+    func selectAction(_ action: SafeRunAction) {
+        selectedActionID = action.id
+        isActionInspectorPresented = true
+    }
+
+    func cancelCurrentPlan() {
+        plan = nil
+        simulationResult = nil
+        selectedActionID = nil
+        isActionInspectorPresented = false
+        selectedSection = .dashboard
+    }
+
+    func editCurrentPlan() {
+        guard var plan else { return }
+        plan.status = .ready
+        plan.conflicts = []
+        plan.actions = plan.actions.map { action in
+            var action = action
+            action.validationStatus = .pending
+            action.conflictStatus = .none
+            return action
+        }
+        self.plan = plan
+        simulationResult = nil
+    }
+
+    func approveCurrentPlanForExecution() {
+        guard var plan, let simulationResult else { return }
+
+        do {
+            try executionEngine.validateApproval(plan: plan, simulation: simulationResult, userApproved: true)
+            plan.status = .approved
+            self.plan = plan
+            errorMessage = "This plan has passed SafeRun’s current approval gate. File execution remains disabled in this preview milestone, so no source files were changed."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func clearError() {

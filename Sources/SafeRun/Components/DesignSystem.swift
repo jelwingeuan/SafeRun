@@ -2,14 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum SafeRunPalette {
-    static let accent = Color(red: 0.18, green: 0.47, blue: 0.95)
-    static let accentSoft = Color(red: 0.18, green: 0.47, blue: 0.95).opacity(0.12)
-    static let mint = Color(red: 0.18, green: 0.67, blue: 0.49)
-    static let warm = Color(red: 0.95, green: 0.63, blue: 0.20)
+    static let accent = SafeRunTheme.accent
+    static let accentSoft = SafeRunTheme.accentSoft
+    static let mint = SafeRunTheme.safe
+    static let warm = SafeRunTheme.caution
 }
 
 struct SafeRunCard<Content: View>: View {
-    let content: Content
+    private let content: Content
     var padding: CGFloat = 20
 
     init(padding: CGFloat = 20, @ViewBuilder content: () -> Content) {
@@ -18,35 +18,26 @@ struct SafeRunCard<Content: View>: View {
     }
 
     var body: some View {
-        content
-            .padding(padding)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
-            }
+        GlassCard(padding: padding) {
+            content
+        }
     }
 }
 
 struct RiskBadge: View {
     let risk: RiskLevel
 
-    private var color: Color {
-        switch risk {
-        case .low: SafeRunPalette.mint
-        case .medium: SafeRunPalette.warm
-        case .high: .orange
-        case .critical: .red
-        }
-    }
-
     var body: some View {
-        Label(risk.title, systemImage: risk.systemImage)
+        Label("\(risk.title) Risk", systemImage: risk.systemImage)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
+            .foregroundStyle(risk.tint)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
-            .background(color.opacity(0.13), in: Capsule())
+            .background(risk.tint.opacity(0.12), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(risk.tint.opacity(0.16), lineWidth: 1)
+            }
             .accessibilityLabel("Risk: \(risk.title)")
     }
 }
@@ -57,10 +48,10 @@ struct ActionBadge: View {
     var body: some View {
         Label(type.title, systemImage: type.systemImage)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(SafeRunPalette.accent)
+            .foregroundStyle(SafeRunTheme.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(SafeRunPalette.accentSoft, in: Capsule())
+            .background(SafeRunTheme.accentSoft, in: Capsule())
     }
 }
 
@@ -68,10 +59,10 @@ struct SummaryMetricCard: View {
     let title: String
     let value: String
     let systemImage: String
-    var tint: Color = SafeRunPalette.accent
+    var tint: Color = SafeRunTheme.accent
 
     var body: some View {
-        SafeRunCard(padding: 15) {
+        GlassCard(padding: 15, tint: tint.opacity(0.18)) {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.title3.weight(.semibold))
@@ -87,7 +78,7 @@ struct SummaryMetricCard: View {
                 }
             }
         }
-        .frame(minWidth: 118, alignment: .leading)
+        .frame(minWidth: 126, alignment: .leading)
     }
 }
 
@@ -99,9 +90,9 @@ struct OperationRow: View {
         HStack(spacing: 14) {
             Image(systemName: action.type.systemImage)
                 .font(.body.weight(.semibold))
-                .foregroundStyle(SafeRunPalette.accent)
+                .foregroundStyle(SafeRunTheme.accent)
                 .frame(width: 34, height: 34)
-                .background(SafeRunPalette.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(SafeRunTheme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
@@ -110,7 +101,7 @@ struct OperationRow: View {
                         .lineLimit(1)
                     if action.validationStatus == .failed {
                         Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(SafeRunTheme.danger)
                             .accessibilityLabel("Validation failed")
                     }
                 }
@@ -118,6 +109,7 @@ struct OperationRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .textSelection(.enabled)
             }
 
             Spacer(minLength: 8)
@@ -127,9 +119,15 @@ struct OperationRow: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 8)
-        .background(isSelected ? SafeRunPalette.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(isSelected ? SafeRunTheme.accent.opacity(0.105) : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(SafeRunTheme.accent.opacity(0.18), lineWidth: 1)
+            }
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(action.type.title), \(action.filename), \(action.risk.title) risk")
@@ -137,46 +135,67 @@ struct OperationRow: View {
 }
 
 struct FolderDropZone: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let folder: URL?
+    let fileCount: Int?
     let isScanning: Bool
     let onChoose: () -> Void
     let onDropFolder: (URL) -> Void
     @State private var isTargeted = false
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 13) {
             Image(systemName: folder == nil ? "folder.badge.plus" : "folder.fill")
-                .font(.system(size: 28, weight: .medium))
-                .foregroundStyle(SafeRunPalette.accent)
+                .font(.system(size: 27, weight: .medium))
+                .foregroundStyle(SafeRunTheme.accent)
                 .frame(width: 56, height: 56)
-                .background(SafeRunPalette.accentSoft, in: Circle())
+                .background(SafeRunTheme.accentSoft, in: Circle())
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
 
             if let folder {
-                Text(folder.lastPathComponent)
-                    .font(.body.weight(.semibold))
-                Text(isScanning ? "Reading folder metadata…" : folder.path)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(spacing: 4) {
+                    Text(folder.lastPathComponent)
+                        .font(.body.weight(.semibold))
+                    Text(isScanning ? "Reading folder metadata…" : "\(fileCount ?? 0) files selected")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(isScanning ? .secondary : SafeRunTheme.safe)
+                    Text(folder.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
             } else {
-                Text("Choose a folder to preview")
-                    .font(.body.weight(.semibold))
-                Text("Drop a folder here, or choose one from Finder")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 4) {
+                    Text(isTargeted ? "Drop the folder to inspect it" : "Drop a folder here")
+                        .font(.body.weight(.semibold))
+                    Text("or choose one from Finder")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            Button(folder == nil ? "Select Folder" : "Change Folder", action: onChoose)
-                .buttonStyle(.bordered)
-                .tint(SafeRunPalette.accent)
+            GlassButton(action: onChoose) {
+                Label(folder == nil ? "Select Folder" : "Change Folder", systemImage: "folder")
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 168)
+        .frame(maxWidth: .infinity, minHeight: 184)
         .padding(.horizontal, 24)
-        .background(isTargeted ? SafeRunPalette.accentSoft : Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .safeRunGlassSurface(
+            tint: isTargeted ? SafeRunTheme.accent.opacity(0.42) : SafeRunTheme.accent.opacity(0.12),
+            cornerRadius: 18,
+            interactive: true
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(SafeRunPalette.accent.opacity(isTargeted ? 0.85 : 0.28), style: StrokeStyle(lineWidth: 1.5, dash: [7, 6]))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(
+                    SafeRunTheme.accent.opacity(isTargeted ? 0.75 : 0.24),
+                    style: StrokeStyle(lineWidth: isTargeted ? 1.6 : 1.1, dash: [7, 6])
+                )
         }
+        .scaleEffect(isTargeted && !reduceMotion ? 1.012 : 1)
+        .animation(reduceMotion ? nil : SafeRunMotion.quick, value: isTargeted)
         .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -200,9 +219,9 @@ struct EmptyStateView: View {
         VStack(spacing: 12) {
             Image(systemName: systemImage)
                 .font(.system(size: 28, weight: .medium))
-                .foregroundStyle(SafeRunPalette.accent)
+                .foregroundStyle(SafeRunTheme.accent)
                 .frame(width: 60, height: 60)
-                .background(SafeRunPalette.accentSoft, in: Circle())
+                .background(SafeRunTheme.accentSoft, in: Circle())
             Text(title)
                 .font(.title3.weight(.semibold))
             Text(message)
@@ -211,9 +230,9 @@ struct EmptyStateView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .buttonStyle(.borderedProminent)
-                    .tint(SafeRunPalette.accent)
+                GlassButton(prominence: .prominent, action: action) {
+                    Text(actionTitle)
+                }
             }
         }
         .frame(maxWidth: .infinity, minHeight: 250)
@@ -222,14 +241,16 @@ struct EmptyStateView: View {
 }
 
 struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .frame(minHeight: 40)
-            .background(SafeRunPalette.accent.opacity(configuration.isPressed ? 0.78 : 1), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .background(SafeRunTheme.accent.opacity(configuration.isPressed ? 0.78 : 1), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(reduceMotion ? nil : SafeRunMotion.quick, value: configuration.isPressed)
     }
 }
