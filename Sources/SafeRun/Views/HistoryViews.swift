@@ -55,6 +55,24 @@ struct RollbacksView: View {
     @State private var journalToRollback: RollbackJournal?
     @State private var transactionToRecover: ExecutionTransaction?
 
+    private var recoveryDialogIsPresented: Binding<Bool> {
+        Binding(
+            get: { transactionToRecover != nil },
+            set: { if !$0 { transactionToRecover = nil } }
+        )
+    }
+
+    private var rollbackDialogIsPresented: Binding<Bool> {
+        Binding(
+            get: { journalToRollback != nil },
+            set: { if !$0 { journalToRollback = nil } }
+        )
+    }
+
+    private var rollbackFolderName: String {
+        journalToRollback?.rootFolder.lastPathComponent ?? "the selected folder"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: SafeRunSpacing.large) {
@@ -149,23 +167,29 @@ struct RollbacksView: View {
             .padding(.vertical, SafeRunSpacing.xLarge)
             .frame(maxWidth: SafeRunTheme.pageWidth, alignment: .leading)
         }
-        .confirmationDialog("Attempt recovery?", item: $transactionToRecover, titleVisibility: .visible) { transaction in
-            Button("Attempt Recovery", role: .destructive) { viewModel.recoverInterruptedRun(transaction) }
+        .confirmationDialog("Attempt recovery?", isPresented: recoveryDialogIsPresented, titleVisibility: .visible) {
+            Button("Attempt Recovery", role: .destructive) {
+                guard let transaction = transactionToRecover else { return }
+                transactionToRecover = nil
+                viewModel.recoverInterruptedRun(transaction)
+            }
             Button("Cancel", role: .cancel) { }
-        } message: { _ in
+        } message: {
             Text("SafeRun will inspect the durable journal and undo changes it can verify. Changed or ambiguous items will be reported for manual inspection.")
         }
         .confirmationDialog(
             "Roll back this run?",
-            item: $journalToRollback,
+            isPresented: rollbackDialogIsPresented,
             titleVisibility: .visible
-        ) { journal in
+        ) {
             Button("Roll Back Changes", role: .destructive) {
+                guard let journal = journalToRollback else { return }
+                journalToRollback = nil
                 viewModel.rollback(journal)
             }
             Button("Cancel", role: .cancel) {}
-        } message: { journal in
-            Text("SafeRun will restore the saved recovery entries inside \(journal.rootFolder.lastPathComponent).")
+        } message: {
+            Text("SafeRun will restore the saved recovery entries inside \(rollbackFolderName).")
         }
     }
 }
