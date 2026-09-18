@@ -111,7 +111,10 @@ struct RollbacksView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(journal.rootFolder.lastPathComponent)
                                         .font(.callout.weight(.semibold))
-                                    Text("\(journal.entries.count) recovery entries · \(journal.createdAt, style: .relative)")
+                                    HStack(spacing: 4) {
+                                        Text("\(journal.entries.count) recovery entries")
+                                        Text(journal.createdAt, style: .relative)
+                                    }
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
