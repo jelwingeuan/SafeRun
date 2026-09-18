@@ -6,9 +6,10 @@ struct SimulationsView: View {
     var body: some View {
         if let plan = viewModel.plan {
             PlanPreviewView(plan: plan)
+                .id(plan.id)
         } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: SafeRunSpacing.large) {
                     pageHeader(
                         eyebrow: "SAFE PREVIEWS",
                         title: "Simulations",
@@ -27,79 +28,111 @@ struct SimulationsView: View {
                             )
                         }
                     } else {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 0) {
                             ForEach(viewModel.historyItems) { item in
-                                Button {
+                                ActivityRow(item: item) {
                                     viewModel.openSimulation(item)
-                                } label: {
-                                    HistoryListRow(item: item)
                                 }
-                                .buttonStyle(.plain)
+                                if item.id != viewModel.historyItems.last?.id {
+                                    Divider()
+                                        .padding(.leading, 52)
+                                }
                             }
+                        }
+                        .padding(.vertical, SafeRunSpacing.xSmall)
+                        .background(Color.primary.opacity(0.018), in: RoundedRectangle(cornerRadius: SafeRunRadius.panel, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: SafeRunRadius.panel, style: .continuous)
+                                .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
                         }
                     }
                 }
-                .padding(.horizontal, 36)
-                .padding(.vertical, 34)
+                .padding(.horizontal, SafeRunSpacing.xLarge)
+                .padding(.vertical, SafeRunSpacing.xLarge)
                 .frame(maxWidth: SafeRunTheme.pageWidth, alignment: .leading)
             }
         }
     }
 }
 
+private enum WorkspaceMode: String, CaseIterable, Identifiable {
+    case plan = "Plan"
+    case changes = "Changes"
+    case beforeAfter = "Before & After"
+
+    var id: String { rawValue }
+}
+
 struct PlanPreviewView: View {
     @EnvironmentObject private var viewModel: SafeRunViewModel
-    @Namespace private var simulationNamespace
+    @State private var workspaceMode: WorkspaceMode = .plan
+    @State private var operationFilter: OperationFilter = .all
+    @State private var operationSearch = ""
+    @State private var isExecutionConfirmationPresented = false
 
     let plan: SafeRunPlan
 
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    previewHeader
-                    GlassEffectGroup {
-                        SimulationStatusSurface(plan: plan, namespace: simulationNamespace)
-                    }
-                    summaryGrid
+                VStack(alignment: .leading, spacing: SafeRunSpacing.large) {
+                    WorkspaceHeader(
+                        title: plan.title,
+                        subtitle: "\(plan.totalOperations) planned operations · \(plan.selectedRootFolder.lastPathComponent)",
+                        risk: viewModel.simulationResult?.overallRisk ?? plan.overallRisk,
+                        statusTitle: statusTitle,
+                        statusImage: statusImage,
+                        statusTint: statusTint
+                    )
 
-                    if !plan.warnings.isEmpty {
-                        noticeCard(
-                            title: "Review notes",
-                            icon: "info.circle",
-                            color: SafeRunTheme.caution,
-                            messages: plan.warnings
-                        )
+                    OperationSummaryStrip(plan: plan, result: viewModel.simulationResult)
+
+                    if viewModel.isExecuting {
+                        executionProgress
                     }
 
                     if !plan.conflicts.isEmpty {
-                        noticeCard(
-                            title: "Conflicts need attention",
-                            icon: "exclamationmark.triangle.fill",
-                            color: SafeRunTheme.danger,
-                            messages: plan.conflicts
-                        )
-                    }
-
-                    operationsCard
-
-                    if let result = viewModel.simulationResult {
-                        FilesystemComparisonView(plan: plan, result: result)
-                    }
-
-                    if plan.status == .approved {
-                        GlassCard(padding: 16, tint: SafeRunTheme.safe.opacity(0.18)) {
-                            Label(
-                                "Plan approved for a future execution engine. No source files have been modified.",
-                                systemImage: "lock.shield"
-                            )
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(SafeRunTheme.safe)
+                        ConflictBanner(count: plan.conflicts.count) {
+                            operationFilter = .conflicts
+                            workspaceMode = .plan
                         }
                     }
+
+                    workspacePicker
+
+                    switch workspaceMode {
+                    case .plan:
+                        planWorkspace
+                    case .changes:
+                        changesWorkspace
+                    case .beforeAfter:
+                        beforeAfterWorkspace
+                    }
+
+                    if !plan.warnings.isEmpty && workspaceMode == .plan {
+                        reviewNotes
+                    }
+
+                    if plan.status == .completed {
+                        Label(
+                            "Files were changed successfully. A rollback journal is available in Rollbacks.",
+                            systemImage: "checkmark.shield.fill"
+                        )
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(SafeRunTheme.safe)
+                        .padding(.vertical, SafeRunSpacing.small)
+                    } else if plan.status == .rolledBack {
+                        Label(
+                            "This plan was rolled back using its recovery journal.",
+                            systemImage: "arrow.uturn.backward.circle.fill"
+                        )
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(SafeRunTheme.accent)
+                        .padding(.vertical, SafeRunSpacing.small)
+                    }
                 }
-                .padding(.horizontal, 36)
-                .padding(.top, 34)
+                .padding(.horizontal, SafeRunSpacing.xLarge)
+                .padding(.top, SafeRunSpacing.xLarge)
                 .padding(.bottom, 118)
                 .frame(maxWidth: 1_220, alignment: .leading)
             }
@@ -109,6 +142,9 @@ struct PlanPreviewView: View {
                 risk: viewModel.simulationResult?.overallRisk ?? plan.overallRisk,
                 simulationResult: viewModel.simulationResult,
                 isSimulating: viewModel.isSimulating,
+                isExecuting: viewModel.isExecuting,
+                isExecuted: plan.status == .completed || plan.status == .rolledBack,
+                executionProgress: viewModel.executionProgress,
                 isApproved: plan.status == .approved,
                 onCancel: viewModel.cancelCurrentPlan,
                 onEditPlan: viewModel.editCurrentPlan,
@@ -116,339 +152,249 @@ struct PlanPreviewView: View {
                     if viewModel.simulationResult == nil {
                         viewModel.simulate()
                     } else {
-                        viewModel.approveCurrentPlanForExecution()
+                        isExecutionConfirmationPresented = true
                     }
                 }
             )
-            .padding(.horizontal, 34)
-            .padding(.bottom, 22)
+            .padding(.horizontal, SafeRunSpacing.xLarge)
+            .padding(.bottom, SafeRunSpacing.medium)
             .frame(maxWidth: 1_180)
         }
-    }
-
-    private var previewHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                GlassButton(action: viewModel.cancelCurrentPlan) {
-                    Label("All simulations", systemImage: "chevron.left")
-                }
-                Text("Simulation")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                Text(plan.title)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        .confirmationDialog(
+            "Run this plan on your files?",
+            isPresented: $isExecutionConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Run \(plan.totalOperations) Actions", role: .destructive) {
+                viewModel.executeCurrentPlan()
             }
-            Spacer()
-            RiskBadge(risk: viewModel.simulationResult?.overallRisk ?? plan.overallRisk)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("SafeRun will make the reviewed changes inside \(plan.selectedRootFolder.lastPathComponent). Deleted and replaced items are moved to recovery storage.")
         }
-    }
-
-    private var summaryGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 12)], spacing: 12) {
-            SummaryMetricCard(title: "Create", value: count(.createDirectory), systemImage: "folder.badge.plus")
-            SummaryMetricCard(title: "Move", value: count(.moveFile), systemImage: "arrow.right")
-            SummaryMetricCard(title: "Rename", value: count(.renameFile), systemImage: "pencil")
-            SummaryMetricCard(title: "Delete", value: count(.deleteFile), systemImage: "trash", tint: SafeRunTheme.caution)
-            SummaryMetricCard(title: "Overwrite", value: count(.replaceFile), systemImage: "arrow.triangle.2.circlepath", tint: SafeRunTheme.danger)
-            SummaryMetricCard(title: "Affected files", value: "\(plan.affectedFileCount)", systemImage: "doc.on.doc")
-        }
-    }
-
-    private var operationsCard: some View {
-        GlassCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Proposed operations")
-                            .font(.headline)
-                        Text("Select an operation to open the Action Inspector.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    GlassStatusPill(
-                        title: "\(plan.totalOperations) total",
-                        systemImage: "list.bullet",
-                        tint: SafeRunTheme.accent
-                    )
-                }
-
-                if plan.actions.isEmpty {
-                    Text("No filesystem changes were proposed for this folder.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 24)
-                } else {
-                    ForEach(plan.actions) { action in
-                        Button {
-                            viewModel.selectAction(action)
-                        } label: {
-                            OperationRow(action: action, isSelected: viewModel.selectedActionID == action.id)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+        .onChange(of: viewModel.simulationResult) { _, result in
+            if result == nil {
+                workspaceMode = .plan
+                operationFilter = .all
+                operationSearch = ""
             }
         }
     }
 
-    private func count(_ type: SafeRunActionType) -> String {
-        "\(plan.actions.filter { $0.type == type }.count)"
-    }
-
-    private func noticeCard(title: String, icon: String, color: Color, messages: [String]) -> some View {
-        GlassCard(padding: 16, tint: color.opacity(0.18)) {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(title, systemImage: icon)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(color)
-                ForEach(messages, id: \.self) { message in
-                    Text("• \(message)")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
+    private var statusTitle: String {
+        if viewModel.isExecuting { return "Executing" }
+        if plan.status == .completed { return "Execution complete" }
+        if plan.status == .rolledBack { return "Rolled back" }
+        if plan.status == .failed { return "Execution failed" }
+        if viewModel.isSimulating { return "Simulating" }
+        if let result = viewModel.simulationResult {
+            return result.canExecute ? "Simulation complete" : "Needs review"
         }
-    }
-}
-
-private struct SimulationStatusSurface: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @EnvironmentObject private var viewModel: SafeRunViewModel
-
-    let plan: SafeRunPlan
-    let namespace: Namespace.ID
-
-    private var result: SimulationResult? { viewModel.simulationResult }
-
-    private var title: String {
-        if viewModel.isSimulating { return "SIMULATING" }
-        if let result {
-            return result.canExecute ? "SIMULATION COMPLETE" : "SIMULATION NEEDS REVIEW"
-        }
-        return "READY TO SIMULATE"
+        return "Ready to simulate"
     }
 
-    private var subtitle: String {
-        if viewModel.isSimulating { return "Testing destinations, conflicts, and rollback readiness in a protected environment." }
-        if let result {
-            return result.canExecute
-                ? "Every current safety check passed without modifying a real file."
-                : "Review the flagged conflicts before this plan can be approved."
-        }
-        return "No real files are being modified. SafeRun will inspect a virtual result first."
-    }
-
-    private var icon: String {
+    private var statusImage: String {
+        if viewModel.isExecuting { return "arrow.triangle.2.circlepath" }
+        if plan.status == .completed { return "checkmark.circle.fill" }
+        if plan.status == .rolledBack { return "arrow.uturn.backward.circle.fill" }
+        if plan.status == .failed { return "exclamationmark.triangle.fill" }
         if viewModel.isSimulating { return "shield.lefthalf.filled" }
-        if let result { return result.canExecute ? "checkmark.shield.fill" : "exclamationmark.shield.fill" }
+        if let result = viewModel.simulationResult {
+            return result.canExecute ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+        }
         return "lock.shield"
     }
 
-    private var tint: Color {
+    private var statusTint: Color {
+        if viewModel.isExecuting { return SafeRunTheme.accent }
+        if plan.status == .completed { return SafeRunTheme.safe }
+        if plan.status == .rolledBack { return SafeRunTheme.accent }
+        if plan.status == .failed { return SafeRunTheme.danger }
         if viewModel.isSimulating { return SafeRunTheme.accent }
-        if let result { return result.canExecute ? SafeRunTheme.safe : SafeRunTheme.caution }
+        if let result = viewModel.simulationResult {
+            return result.canExecute ? SafeRunTheme.safe : SafeRunTheme.caution
+        }
         return SafeRunTheme.accent
     }
 
-    var body: some View {
-        FloatingGlassPanel(padding: 24, tint: tint.opacity(0.22)) {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .center, spacing: 18) {
-                    ZStack {
-                        Circle()
-                            .fill(tint.opacity(0.12))
-                            .frame(width: 66, height: 66)
-                        Image(systemName: icon)
-                            .font(.system(size: 27, weight: .semibold))
-                            .foregroundStyle(tint)
-                    }
-                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+    private var executionProgress: some View {
+        VStack(alignment: .leading, spacing: SafeRunSpacing.small) {
+            HStack {
+                Label(viewModel.executionStatus.isEmpty ? "Executing approved changes" : viewModel.executionStatus, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Spacer()
+                Text("\(Int(viewModel.executionProgress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView(value: viewModel.executionProgress)
+                .tint(SafeRunTheme.accent)
+        }
+        .padding(.horizontal, SafeRunSpacing.medium)
+        .padding(.vertical, SafeRunSpacing.small)
+        .background(SafeRunTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: SafeRunRadius.row, style: .continuous))
+    }
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(title)
-                            .font(.caption.weight(.bold))
-                            .tracking(1.25)
-                            .foregroundStyle(tint)
-                        Text(subtitle)
-                            .font(.title3.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 8)
-                }
-
-                if viewModel.isSimulating {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(tint)
-                        Text("Checking \(plan.totalOperations) operations…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else if let result {
-                    HStack(spacing: 26) {
-                        simulationMetric("Passed", value: "\(result.actionsPassed)", symbol: "checkmark.circle.fill", tint: SafeRunTheme.safe)
-                        simulationMetric("Warnings", value: "\(result.warnings.count)", symbol: "info.circle.fill", tint: SafeRunTheme.caution)
-                        simulationMetric("Conflicts", value: "\(result.conflicts.count)", symbol: "exclamationmark.triangle.fill", tint: result.conflicts.isEmpty ? .secondary : SafeRunTheme.danger)
-                        simulationMetric("Reversible", value: reversibilityText, symbol: "arrow.uturn.backward.circle.fill", tint: SafeRunTheme.accent)
-                        Spacer(minLength: 0)
-                    }
-                } else {
-                    Label("Simulation stays isolated from your selected folder.", systemImage: "lock")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+    private var workspacePicker: some View {
+        HStack {
+            Picker("Workspace view", selection: $workspaceMode) {
+                ForEach(WorkspaceMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 390)
+            Spacer(minLength: 0)
         }
-        .safeRunGlassEffectID("simulation-status", in: namespace)
-        .safeRunGlassTransition()
-        .animation(reduceMotion ? nil : SafeRunMotion.gentle, value: title)
     }
 
-    private var reversibilityText: String {
-        guard plan.totalOperations > 0 else { return "—" }
-        return plan.reversibleActionCount == plan.totalOperations
-            ? "100%"
-            : "\(plan.reversibleActionCount) / \(plan.totalOperations)"
+    private var planWorkspace: some View {
+        VStack(alignment: .leading, spacing: SafeRunSpacing.medium) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Proposed operations")
+                        .font(.headline)
+                    Text("Select an operation to open the Action Inspector.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(filteredActions.count) shown")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            OperationFilterBar(filter: $operationFilter, searchText: $operationSearch)
+
+            if filteredActions.isEmpty {
+                emptyOperations
+            } else {
+                OperationTable(
+                    actions: filteredActions,
+                    selectedActionID: viewModel.selectedActionID,
+                    onSelect: viewModel.selectAction
+                )
+            }
+        }
     }
 
-    private func simulationMetric(_ title: String, value: String, symbol: String, tint: Color) -> some View {
-        Label {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value)
-                    .font(.title3.weight(.bold).monospacedDigit())
-                Text(title)
+    private var changesWorkspace: some View {
+        VStack(alignment: .leading, spacing: SafeRunSpacing.medium) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Changes in this plan")
+                    .font(.headline)
+                Text("A focused list of the filesystem changes SafeRun will validate.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        } icon: {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(tint)
+            ChangesOnlyList(actions: filteredActions, selectedActionID: viewModel.selectedActionID, onSelect: viewModel.selectAction)
+        }
+    }
+
+    private var beforeAfterWorkspace: some View {
+        Group {
+            if let result = viewModel.simulationResult {
+                FilesystemComparisonView(plan: plan, result: result)
+            } else {
+                ContentUnavailableView(
+                    "Run a simulation first",
+                    systemImage: "arrow.left.arrow.right",
+                    description: Text("The virtual before-and-after view appears after SafeRun validates this plan.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 220)
+            }
+        }
+    }
+
+    private var reviewNotes: some View {
+        VStack(alignment: .leading, spacing: SafeRunSpacing.small) {
+            Label("Review notes", systemImage: "info.circle")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(SafeRunTheme.caution)
+            ForEach(plan.warnings, id: \.self) { warning in
+                Text("• \(warning)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, SafeRunSpacing.small)
+    }
+
+    private var emptyOperations: some View {
+        ContentUnavailableView(
+            operationFilter == .all && operationSearch.isEmpty ? "No operations proposed" : "No matching operations",
+            systemImage: "line.3.horizontal.decrease.circle",
+            description: Text(operationFilter == .all && operationSearch.isEmpty ? "SafeRun found no filesystem changes for this instruction." : "Try a different filter or search term.")
+        )
+        .frame(maxWidth: .infinity, minHeight: 180)
+    }
+
+    private var filteredActions: [SafeRunAction] {
+        let query = operationSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return plan.actions.filter { action in
+            guard operationFilter.matches(action) else { return false }
+            guard !query.isEmpty else { return true }
+            let searchable = [
+                action.type.title,
+                action.filename,
+                action.description,
+                action.sourceURL?.path ?? "",
+                action.destinationURL?.path ?? ""
+            ].joined(separator: " ")
+            return searchable.localizedCaseInsensitiveContains(query)
         }
     }
 }
 
-private enum FilesystemComparisonMode: String, CaseIterable, Identifiable {
-    case sideBySide = "Before / After"
-    case changesOnly = "Changes Only"
-
-    var id: String { rawValue }
-}
-
-private struct FilesystemComparisonView: View {
-    @State private var mode: FilesystemComparisonMode = .sideBySide
-
-    let plan: SafeRunPlan
-    let result: SimulationResult
+private struct ChangesOnlyList: View {
+    let actions: [SafeRunAction]
+    let selectedActionID: UUID?
+    let onSelect: (SafeRunAction) -> Void
 
     var body: some View {
-        GlassCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Filesystem comparison")
-                            .font(.headline)
-                        Text("A virtual before-and-after view of \(result.actionsPassed) validated changes.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("Comparison mode", selection: $mode) {
-                        ForEach(FilesystemComparisonMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 260)
-                }
-
-                if mode == .sideBySide {
-                    sideBySide
-                } else {
-                    changesOnly
-                }
-            }
-        }
-    }
-
-    private var sideBySide: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("BEFORE")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("AFTER")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.caption2.weight(.bold))
-            .tracking(0.9)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 7)
-
-            ForEach(plan.actions) { action in
-                HStack(spacing: 12) {
-                    comparisonFileLabel(beforeName(for: action), isMuted: action.type == .createDirectory)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    comparisonIndicator(for: action)
-                        .frame(width: 30)
-                    comparisonFileLabel(afterName(for: action), isMuted: action.type == .deleteFile)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-        }
-    }
-
-    private var changesOnly: some View {
-        VStack(spacing: 8) {
-            ForEach(plan.actions) { action in
-                HStack(spacing: 12) {
-                    comparisonIndicator(for: action)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(action.description)
-                            .font(.callout.weight(.medium))
-                        Text(changePath(for: action))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            ForEach(actions) { action in
+                Button {
+                    onSelect(action)
+                } label: {
+                    HStack(spacing: SafeRunSpacing.medium) {
+                        Image(systemName: action.type.systemImage)
+                            .foregroundStyle(SafeRunTheme.accent)
+                            .frame(width: 26)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(action.description)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                            Text(changePath(for: action))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: SafeRunSpacing.small)
+                        RiskBadge(risk: action.risk)
+                        ActionValidationLabel(status: action.validationStatus)
                     }
-                    Spacer()
-                    RiskBadge(risk: action.risk)
+                    .padding(.horizontal, SafeRunSpacing.medium)
+                    .padding(.vertical, SafeRunSpacing.medium)
+                    .background(
+                        selectedActionID == action.id ? SafeRunTheme.accent.opacity(0.10) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: SafeRunRadius.row, style: .continuous)
+                    )
                 }
-                .padding(12)
-                .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .buttonStyle(.plain)
+                if action.id != actions.last?.id {
+                    Divider()
+                        .padding(.leading, 52)
+                }
             }
         }
-    }
-
-    private func comparisonFileLabel(_ title: String, isMuted: Bool) -> some View {
-        Label(title, systemImage: "doc")
-            .font(.caption.weight(.medium))
-            .foregroundStyle(isMuted ? .tertiary : .secondary)
-            .lineLimit(1)
-    }
-
-    private func comparisonIndicator(for action: SafeRunAction) -> some View {
-        Image(systemName: changeSymbol(for: action.type))
-            .font(.caption.weight(.bold))
-            .foregroundStyle(changeTint(for: action.type))
-            .frame(width: 26, height: 26)
-            .background(changeTint(for: action.type).opacity(0.10), in: Circle())
-            .accessibilityLabel("\(action.type.title) change")
-    }
-
-    private func beforeName(for action: SafeRunAction) -> String {
-        if action.type == .createDirectory { return "New folder" }
-        return action.sourceURL?.lastPathComponent ?? action.filename
-    }
-
-    private func afterName(for action: SafeRunAction) -> String {
-        if action.type == .deleteFile { return "Removed" }
-        return action.destinationURL?.lastPathComponent ?? action.filename
+        .padding(.vertical, SafeRunSpacing.xSmall)
+        .background(Color.primary.opacity(0.018), in: RoundedRectangle(cornerRadius: SafeRunRadius.panel, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: SafeRunRadius.panel, style: .continuous)
+                .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
+        }
     }
 
     private func changePath(for action: SafeRunAction) -> String {
@@ -460,6 +406,105 @@ private struct FilesystemComparisonView: View {
         default:
             return "\(action.sourceURL?.lastPathComponent ?? action.filename) → \(action.destinationURL?.lastPathComponent ?? action.filename)"
         }
+    }
+}
+
+private struct ActionValidationLabel: View {
+    let status: ActionValidationStatus
+
+    var body: some View {
+        Label(status.title, systemImage: image)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(tint)
+    }
+
+    private var image: String {
+        switch status {
+        case .pending: "circle.dashed"
+        case .passed: "checkmark.circle.fill"
+        case .failed: "exclamationmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch status {
+        case .pending: .secondary
+        case .passed: SafeRunTheme.safe
+        case .failed: SafeRunTheme.danger
+        }
+    }
+}
+
+private struct FilesystemComparisonView: View {
+    let plan: SafeRunPlan
+    let result: SimulationResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SafeRunSpacing.medium) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Virtual filesystem")
+                    .font(.headline)
+                Text("Before and after \(result.actionsPassed) validated changes without modifying the selected folder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                HStack(spacing: SafeRunSpacing.medium) {
+                    Text("BEFORE")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("")
+                        .frame(width: 26)
+                    Text("AFTER")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.caption2.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, SafeRunSpacing.medium)
+                .padding(.bottom, SafeRunSpacing.small)
+
+                ForEach(plan.actions) { action in
+                    HStack(spacing: SafeRunSpacing.medium) {
+                        comparisonFileLabel(beforeName(for: action), isMuted: action.type == .createDirectory)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: changeSymbol(for: action.type))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(changeTint(for: action.type))
+                            .frame(width: 26, height: 26)
+                            .background(changeTint(for: action.type).opacity(0.10), in: Circle())
+                        comparisonFileLabel(afterName(for: action), isMuted: action.type == .deleteFile)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, SafeRunSpacing.medium)
+                    .padding(.vertical, SafeRunSpacing.small)
+                    .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: SafeRunRadius.row, style: .continuous))
+                }
+            }
+            .padding(.vertical, SafeRunSpacing.medium)
+            .background(Color.primary.opacity(0.018), in: RoundedRectangle(cornerRadius: SafeRunRadius.panel, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: SafeRunRadius.panel, style: .continuous)
+                    .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
+            }
+        }
+    }
+
+    private func comparisonFileLabel(_ title: String, isMuted: Bool) -> some View {
+        Label(title, systemImage: "doc")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(isMuted ? .tertiary : .secondary)
+            .lineLimit(1)
+    }
+
+    private func beforeName(for action: SafeRunAction) -> String {
+        if action.type == .createDirectory { return "New folder" }
+        return action.sourceURL?.lastPathComponent ?? action.filename
+    }
+
+    private func afterName(for action: SafeRunAction) -> String {
+        if action.type == .deleteFile { return "Removed" }
+        return action.destinationURL?.lastPathComponent ?? action.filename
     }
 
     private func changeSymbol(for type: SafeRunActionType) -> String {
@@ -478,37 +523,6 @@ private struct FilesystemComparisonView: View {
         case .deleteFile, .replaceFile: SafeRunTheme.caution
         case .createDirectory: SafeRunTheme.safe
         case .moveFile, .copyFile, .renameFile: SafeRunTheme.accent
-        }
-    }
-}
-
-struct HistoryListRow: View {
-    let item: RunHistoryItem
-
-    var body: some View {
-        InteractiveGlassCard(padding: 16, tint: item.risk.tint.opacity(0.12)) {
-            HStack(spacing: 14) {
-                Image(systemName: "waveform.path.ecg")
-                    .foregroundStyle(SafeRunTheme.accent)
-                    .frame(width: 34, height: 34)
-                    .background(SafeRunTheme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.selectedDirectory.lastPathComponent)
-                        .font(.body.weight(.semibold))
-                    Text(item.instruction)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("\(item.operationCount) operations")
-                    Text(item.timestamp, style: .relative)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                RiskBadge(risk: item.risk)
-            }
         }
     }
 }

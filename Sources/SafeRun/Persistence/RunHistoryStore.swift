@@ -26,6 +26,20 @@ actor RunHistoryStore {
     func append(_ item: RunHistoryItem) throws {
         var history = load()
         history.insert(item, at: 0)
+        try persist(history)
+    }
+
+    func update(_ item: RunHistoryItem) throws {
+        var history = load()
+        if let index = history.firstIndex(where: { $0.id == item.id }) {
+            history[index] = item
+        } else {
+            history.insert(item, at: 0)
+        }
+        try persist(history)
+    }
+
+    private func persist(_ history: [RunHistoryItem]) throws {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(history).write(to: fileURL, options: .atomic)
     }

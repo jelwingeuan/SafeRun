@@ -23,15 +23,21 @@ struct RootView: View {
                 .background(.clear)
             }
             .navigationSplitViewStyle(.balanced)
-            .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 235)
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                GlassToolbar {
-                    Label("SafeRun", systemImage: "checkmark.shield.fill")
+                VStack(spacing: 1) {
+                    Text(viewModel.selectedSection.title)
                         .font(.headline.weight(.semibold))
-                        .foregroundStyle(SafeRunTheme.accent)
+                    if let folder = viewModel.selectedFolder {
+                        Label(folder.lastPathComponent, systemImage: "folder")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
+                .frame(maxWidth: 280)
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
@@ -50,19 +56,33 @@ struct RootView: View {
                     Label("Choose Folder", systemImage: "folder.badge.plus")
                 }
                 .help("Choose a folder to preview")
+
+                Button {
+                    viewModel.selectedSection = .completedRuns
+                } label: {
+                    Label("History", systemImage: "clock.arrow.circlepath")
+                }
+                .help("Open completed simulation history")
+
+                Button {
+                    viewModel.selectedSection = .settings
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Open SafeRun settings")
             }
         }
         .inspector(isPresented: $viewModel.isActionInspectorPresented) {
             if let action = viewModel.selectedAction {
                 ActionInspectorView(action: action)
-                    .inspectorColumnWidth(min: 280, ideal: 330, max: 420)
+                    .inspectorColumnWidth(min: 260, ideal: 300, max: 340)
             } else {
                 ContentUnavailableView(
                     "No action selected",
                     systemImage: "cursorarrow.click.2",
                     description: Text("Select a proposed operation to inspect its safety details.")
                 )
-                .inspectorColumnWidth(min: 280, ideal: 330, max: 420)
+                .inspectorColumnWidth(min: 260, ideal: 300, max: 340)
             }
         }
         .alert("SafeRun", isPresented: Binding(
@@ -96,17 +116,17 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 17)
-            .padding(.top, 22)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 14) {
                     sidebarGroup("WORKSPACE", sections: [.dashboard, .simulations])
                     sidebarGroup("HISTORY", sections: [.completedRuns, .rollbacks])
                     sidebarGroup("PREFERENCES", sections: [.settings])
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 18)
             }
 
@@ -186,11 +206,11 @@ private struct SidebarNavigationItem: View {
 
     private var rowLabel: some View {
         Label(section.title, systemImage: section.systemImage)
-            .font(.body.weight(isSelected ? .semibold : .regular))
+            .font(.callout.weight(isSelected ? .semibold : .regular))
             .foregroundStyle(isSelected ? .primary : .secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 11)
-            .padding(.vertical, 9)
+            .padding(.vertical, 8)
     }
 }
 

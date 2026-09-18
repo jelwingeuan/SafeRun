@@ -167,6 +167,199 @@ final class SafeRunTests: XCTestCase {
         XCTAssertNoThrow(try SafeExecutionEngine().validateApproval(plan: plan, simulation: result, userApproved: true))
     }
 
+    func testExecutionMovesFilesAndRollbackRestoresThem() async throws {
+        let root = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("photo.jpg")
+        let destinationFolder = root.appendingPathComponent("Images", isDirectory: true)
+        let destination = destinationFolder.appendingPathComponent("photo.jpg")
+        try Data("image".utf8).write(to: source)
+
+        let plan = SafeRunPlan(
+            title: "Move photo",
+            originalInstruction: "Move photo into Images",
+            selectedRootFolder: root,
+            actions: [
+                SafeRunAction(
+                    type: .createDirectory,
+                    destinationURL: destinationFolder,
+                    filename: "Images",
+                    description: "Create Images",
+                    risk: .low,
+                    isReversible: true
+                ),
+                SafeRunAction(
+                    type: .moveFile,
+                    sourceURL: source,
+                    destinationURL: destination,
+                    filename: "photo.jpg",
+                    description: "Move photo.jpg",
+                    risk: .medium,
+                    isReversible: true
+                )
+            ],
+            status: .simulationComplete
+        )
+
+        let simulation = await SimulationEngine().simulate(
+            plan: plan,
+            context: try await FolderContextScanner().scan(root: root)
+        )
+        XCTAssertTrue(simulation.canExecute)
+
+        let engine = SafeExecutionEngine()
+        let report = try await engine.execute(plan: plan, simulation: simulation, userApproved: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+
+        try await engine.rollback(report.journal)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destinationFolder.path))
+    }
+
+    func testExecutionMovesDeletedFileToRecoveryAndRestoresIt() async throws {
+        let root = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("remove-me.txt")
+        try Data("recover me".utf8).write(to: source)
+        let plan = SafeRunPlan(
+            title: "Delete file",
+            originalInstruction: "Delete remove-me.txt",
+            selectedRootFolder: root,
+            actions: [
+                SafeRunAction(
+                    type: .deleteFile,
+                    sourceURL: source,
+                    filename: "remove-me.txt",
+                    description: "Delete remove-me.txt",
+                    risk: .high,
+                    isReversible: true
+                )
+            ],
+            status: .simulationComplete
+        )
+
+        let simulation = await SimulationEngine().simulate(
+            plan: plan,
+            context: try await FolderContextScanner().scan(root: root)
+        )
+        XCTAssertTrue(simulation.canExecute)
+
+        let engine = SafeExecutionEngine()
+        let report = try await engine.execute(plan: plan, simulation: simulation, userApproved: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertTrue(report.journal.entries.first?.recoveryURL.map { FileManager.default.fileExists(atPath: $0.path) } == true)
+
+        try await engine.rollback(report.journal)
+        XCTAssertEqual(try String(contentsOf: source), "recover me")
+        XCTAssertFalse(report.journal.entries.contains { entry in
+            guard let recoveryURL = entry.recoveryURL else { return false }
+            return FileManager.default.fileExists(atPath: recoveryURL.path)
+        })
+    }
+
+    func testExecutionReplacesDestinationAndRollbackRestoresPreviousContent() async throws {
+        let root = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("new.txt")
+        let destination = root.appendingPathComponent("existing.txt")
+        try Data("new content".utf8).write(to: source)
+        try Data("old content".utf8).write(to: destination)
+
+        let plan = SafeRunPlan(
+            title: "Replace file",
+            originalInstruction: "Replace existing.txt",
+            selectedRootFolder: root,
+            actions: [
+                SafeRunAction(
+                    type: .replaceFile,
+                    sourceURL: source,
+                    destinationURL: destination,
+                    filename: "existing.txt",
+                    description: "Replace existing.txt",
+                    risk: .high,
+                    isReversible: true
+                )
+            ],
+            status: .simulationComplete
+        )
+
+        let simulation = await SimulationEngine().simulate(
+            plan: plan,
+            context: try await FolderContextScanner().scan(root: root)
+        )
+        XCTAssertTrue(simulation.canExecute)
+
+        let engine = SafeExecutionEngine()
+        let report = try await engine.execute(plan: plan, simulation: simulation, userApproved: true)
+        XCTAssertEqual(try String(contentsOf: source), "new content")
+        XCTAssertEqual(try String(contentsOf: destination), "new content")
+
+        try await engine.rollback(report.journal)
+        XCTAssertEqual(try String(contentsOf: source), "new content")
+        XCTAssertEqual(try String(contentsOf: destination), "old content")
+    }
+
+    func testExecutionAutomaticallyRollsBackEarlierChangesWhenLaterSourceDisappears() async throws {
+        let root = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let firstSource = root.appendingPathComponent("first.txt")
+        let secondSource = root.appendingPathComponent("second.txt")
+        let firstDestination = root.appendingPathComponent("first-moved.txt")
+        let secondDestination = root.appendingPathComponent("second-moved.txt")
+        try Data("first".utf8).write(to: firstSource)
+        try Data("second".utf8).write(to: secondSource)
+
+        let plan = SafeRunPlan(
+            title: "Move two files",
+            originalInstruction: "Move both files",
+            selectedRootFolder: root,
+            actions: [
+                SafeRunAction(
+                    type: .moveFile,
+                    sourceURL: firstSource,
+                    destinationURL: firstDestination,
+                    filename: "first.txt",
+                    description: "Move first.txt",
+                    risk: .medium,
+                    isReversible: true
+                ),
+                SafeRunAction(
+                    type: .moveFile,
+                    sourceURL: secondSource,
+                    destinationURL: secondDestination,
+                    filename: "second.txt",
+                    description: "Move second.txt",
+                    risk: .medium,
+                    isReversible: true
+                )
+            ],
+            status: .simulationComplete
+        )
+
+        let simulation = await SimulationEngine().simulate(
+            plan: plan,
+            context: try await FolderContextScanner().scan(root: root)
+        )
+        XCTAssertTrue(simulation.canExecute)
+        try FileManager.default.removeItem(at: secondSource)
+
+        do {
+            _ = try await SafeExecutionEngine().execute(plan: plan, simulation: simulation, userApproved: true)
+            XCTFail("Execution should fail when the filesystem changes after simulation.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("rolled back"))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstSource.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstDestination.path))
+    }
+
     private func makeTemporaryFolder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SafeRunTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

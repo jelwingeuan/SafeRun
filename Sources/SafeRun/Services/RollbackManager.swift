@@ -3,18 +3,21 @@ import Foundation
 struct RollbackManager: Sendable {
     func makeJournal(for plan: SafeRunPlan) -> RollbackJournal {
         let entries = plan.actions.map { action in
-            RollbackJournalEntry(
+            let recoveryURL = action.type == .deleteFile || action.type == .replaceFile
+                ? recoveryURL(for: action)
+                : nil
+            return RollbackJournalEntry(
                 id: UUID(),
                 originalActionID: action.id,
-                inverseAction: inverse(of: action),
-                recoveryURL: action.type == .deleteFile || action.type == .replaceFile ? recoveryURL(for: action) : nil,
+                inverseAction: inverse(of: action, recoveryURL: recoveryURL),
+                recoveryURL: recoveryURL,
                 note: note(for: action)
             )
         }
-        return RollbackJournal(id: UUID(), planID: plan.id, createdAt: .now, entries: entries)
+        return RollbackJournal(id: UUID(), planID: plan.id, rootFolder: plan.selectedRootFolder, createdAt: .now, entries: entries)
     }
 
-    private func inverse(of action: SafeRunAction) -> SafeRunAction? {
+    private func inverse(of action: SafeRunAction, recoveryURL: URL?) -> SafeRunAction? {
         switch action.type {
         case .moveFile, .renameFile:
             guard let source = action.sourceURL, let destination = action.destinationURL else { return nil }
@@ -47,12 +50,32 @@ struct RollbackManager: Sendable {
                 risk: .low,
                 isReversible: true
             )
-        case .deleteFile, .replaceFile:
-            return nil
+        case .deleteFile:
+            guard let source = action.sourceURL, let recoveryURL else { return nil }
+            return SafeRunAction(
+                type: .moveFile,
+                sourceURL: recoveryURL,
+                destinationURL: source,
+                filename: action.filename,
+                description: "Restore deleted \(action.filename)",
+                risk: .medium,
+                isReversible: true
+            )
+        case .replaceFile:
+            guard let destination = action.destinationURL, let recoveryURL else { return nil }
+            return SafeRunAction(
+                type: .replaceFile,
+                sourceURL: recoveryURL,
+                destinationURL: destination,
+                filename: action.filename,
+                description: "Restore replaced \(action.filename)",
+                risk: .high,
+                isReversible: true
+            )
         }
     }
 
-    private func recoveryURL(for action: SafeRunAction) -> URL? {
+    func recoveryURL(for action: SafeRunAction) -> URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("SafeRun/Recovery", isDirectory: true)
             .appendingPathComponent(action.id.uuidString, isDirectory: false)

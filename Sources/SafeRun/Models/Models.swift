@@ -30,7 +30,7 @@ enum AppSection: String, CaseIterable, Hashable, Identifiable {
     }
 }
 
-enum SafeRunActionType: String, Codable, CaseIterable, Hashable, Identifiable {
+enum SafeRunActionType: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
     case createDirectory
     case moveFile
     case copyFile
@@ -74,7 +74,7 @@ enum SafeRunActionType: String, Codable, CaseIterable, Hashable, Identifiable {
     }
 }
 
-enum RiskLevel: Int, Codable, CaseIterable, Comparable, Hashable {
+enum RiskLevel: Int, Codable, CaseIterable, Comparable, Hashable, Sendable {
     case low = 0
     case medium = 1
     case high = 2
@@ -103,19 +103,19 @@ enum RiskLevel: Int, Codable, CaseIterable, Comparable, Hashable {
     }
 }
 
-enum ActionValidationStatus: String, Codable, Hashable {
+enum ActionValidationStatus: String, Codable, Hashable, Sendable {
     case pending
     case passed
     case failed
 }
 
-enum ConflictStatus: String, Codable, Hashable {
+enum ConflictStatus: String, Codable, Hashable, Sendable {
     case none
     case warning
     case unresolved
 }
 
-enum SafeRunPlanStatus: String, Codable, Hashable {
+enum SafeRunPlanStatus: String, Codable, Hashable, Sendable {
     case draft
     case analyzing
     case ready
@@ -128,14 +128,14 @@ enum SafeRunPlanStatus: String, Codable, Hashable {
     case rolledBack
 }
 
-enum ActionExecutionState: String, Codable, Hashable {
+enum ActionExecutionState: String, Codable, Hashable, Sendable {
     case pending
     case running
     case completed
     case failed
 }
 
-struct SafeRunAction: Identifiable, Codable, Hashable {
+struct SafeRunAction: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let type: SafeRunActionType
     let sourceURL: URL?
@@ -175,7 +175,7 @@ struct SafeRunAction: Identifiable, Codable, Hashable {
     }
 }
 
-struct SafeRunPlan: Identifiable, Codable, Hashable {
+struct SafeRunPlan: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let title: String
     let originalInstruction: String
@@ -254,7 +254,7 @@ struct VirtualFileEntry: Identifiable, Codable, Hashable {
     var id: String { path }
 }
 
-struct SimulationResult: Codable, Hashable {
+struct SimulationResult: Codable, Hashable, Sendable {
     let success: Bool
     let actionsPassed: Int
     let actionsFailed: Int
@@ -265,7 +265,7 @@ struct SimulationResult: Codable, Hashable {
     let canExecute: Bool
 }
 
-struct RollbackJournalEntry: Codable, Hashable, Identifiable {
+struct RollbackJournalEntry: Codable, Hashable, Identifiable, Sendable {
     let id: UUID
     let originalActionID: UUID
     let inverseAction: SafeRunAction?
@@ -273,11 +273,23 @@ struct RollbackJournalEntry: Codable, Hashable, Identifiable {
     let note: String
 }
 
-struct RollbackJournal: Codable, Hashable, Identifiable {
+struct RollbackJournal: Codable, Hashable, Identifiable, Sendable {
     let id: UUID
     let planID: UUID
+    let rootFolder: URL
     let createdAt: Date
     let entries: [RollbackJournalEntry]
+}
+
+struct ExecutionProgress: Sendable {
+    let completedActions: Int
+    let totalActions: Int
+    let currentAction: String
+}
+
+struct ExecutionReport: Sendable {
+    let journal: RollbackJournal
+    let completedActionIDs: [UUID]
 }
 
 struct RunHistoryItem: Codable, Hashable, Identifiable {
@@ -299,6 +311,7 @@ enum SafeRunError: LocalizedError, Equatable {
     case planNotExecutable(String)
     case invalidPath(URL)
     case executionUnavailable
+    case executionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -309,6 +322,7 @@ enum SafeRunError: LocalizedError, Equatable {
         case .planNotExecutable(let message): message
         case .invalidPath(let url): "SafeRun blocked an unsafe path: \(url.path)."
         case .executionUnavailable: "Safe execution is not enabled until this plan has passed simulation and received your approval."
+        case .executionFailed(let message): message
         }
     }
 }

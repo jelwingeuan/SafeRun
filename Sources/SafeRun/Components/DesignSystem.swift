@@ -145,19 +145,19 @@ struct FolderDropZone: View {
     @State private var isTargeted = false
 
     var body: some View {
-        VStack(spacing: 13) {
+        HStack(spacing: SafeRunSpacing.medium) {
             Image(systemName: folder == nil ? "folder.badge.plus" : "folder.fill")
-                .font(.system(size: 27, weight: .medium))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(SafeRunTheme.accent)
-                .frame(width: 56, height: 56)
-                .background(SafeRunTheme.accentSoft, in: Circle())
+                .frame(width: 38, height: 38)
+                .background(SafeRunTheme.accentSoft, in: RoundedRectangle(cornerRadius: SafeRunRadius.control, style: .continuous))
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
 
-            if let folder {
-                VStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
+                if let folder {
                     Text(folder.lastPathComponent)
                         .font(.body.weight(.semibold))
-                    Text(isScanning ? "Reading folder metadata…" : "\(fileCount ?? 0) files selected")
+                    Text(isScanning ? "Reading folder metadata…" : "\(fileCount ?? 0) files ready to preview")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(isScanning ? .secondary : SafeRunTheme.safe)
                     Text(folder.path)
@@ -165,9 +165,7 @@ struct FolderDropZone: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .textSelection(.enabled)
-                }
-            } else {
-                VStack(spacing: 4) {
+                } else {
                     Text(isTargeted ? "Drop the folder to inspect it" : "Drop a folder here")
                         .font(.body.weight(.semibold))
                     Text("or choose one from Finder")
@@ -176,19 +174,20 @@ struct FolderDropZone: View {
                 }
             }
 
+            Spacer(minLength: SafeRunSpacing.small)
+
             GlassButton(action: onChoose) {
-                Label(folder == nil ? "Select Folder" : "Change Folder", systemImage: "folder")
+                Label(folder == nil ? "Attach Folder" : "Change Folder", systemImage: "folder")
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 184)
-        .padding(.horizontal, 24)
-        .safeRunGlassSurface(
-            tint: isTargeted ? SafeRunTheme.accent.opacity(0.42) : SafeRunTheme.accent.opacity(0.12),
-            cornerRadius: 18,
-            interactive: true
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(.horizontal, SafeRunSpacing.medium)
+        .background(
+            (isTargeted ? SafeRunTheme.accent.opacity(0.10) : Color.primary.opacity(0.035)),
+            in: RoundedRectangle(cornerRadius: SafeRunRadius.row, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: SafeRunRadius.row, style: .continuous)
                 .strokeBorder(
                     SafeRunTheme.accent.opacity(isTargeted ? 0.75 : 0.24),
                     style: StrokeStyle(lineWidth: isTargeted ? 1.6 : 1.1, dash: [7, 6])

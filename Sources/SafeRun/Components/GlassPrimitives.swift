@@ -7,8 +7,8 @@ enum SafeRunTheme {
     static let safe = Color(red: 0.20, green: 0.66, blue: 0.53)
     static let caution = Color(red: 0.90, green: 0.58, blue: 0.19)
     static let danger = Color(red: 0.86, green: 0.28, blue: 0.25)
-    static let surfaceRadius: CGFloat = 20
-    static let floatingRadius: CGFloat = 24
+    static let surfaceRadius: CGFloat = 16
+    static let floatingRadius: CGFloat = 20
     static let pageWidth: CGFloat = 1_140
 }
 
@@ -89,9 +89,9 @@ private struct SafeRunGlassSurfaceModifier: ViewModifier {
                 .strokeBorder(.primary.opacity(reduceTransparency ? 0.16 : 0.09), lineWidth: 1)
         }
         .shadow(
-            color: .black.opacity(elevated ? (reduceTransparency ? 0.15 : 0.10) : 0.035),
-            radius: elevated ? 22 : 10,
-            y: elevated ? 10 : 4
+            color: .black.opacity(elevated ? (reduceTransparency ? 0.12 : 0.07) : 0.025),
+            radius: elevated ? 16 : 8,
+            y: elevated ? 6 : 3
         )
     }
 }
@@ -321,6 +321,9 @@ struct GlassActionBar: View {
     let risk: RiskLevel
     let simulationResult: SimulationResult?
     let isSimulating: Bool
+    let isExecuting: Bool
+    let isExecuted: Bool
+    let executionProgress: Double
     let isApproved: Bool
     let onCancel: () -> Void
     let onEditPlan: () -> Void
@@ -330,11 +333,15 @@ struct GlassActionBar: View {
 
     private var primaryTitle: String {
         if isSimulating { return "Simulating…" }
+        if isExecuting { return "Executing…" }
+        if isExecuted { return "Completed" }
         if isApproved { return "Approved" }
         return isComplete ? "Run Safely" : "Simulate"
     }
 
     private var primarySymbol: String {
+        if isExecuting { return "arrow.triangle.2.circlepath" }
+        if isExecuted { return "checkmark.circle.fill" }
         if isApproved { return "checkmark.shield.fill" }
         return isComplete ? "play.shield.fill" : "play.fill"
     }
@@ -359,9 +366,9 @@ struct GlassActionBar: View {
                 }
 
                 GlassStatusPill(
-                    title: isComplete ? (isApproved ? "Approved" : (canRun ? "Ready to Run" : "Needs Review")) : "\(actionCount) Actions · \(risk.title) Risk",
-                    systemImage: isComplete ? (isApproved || canRun ? "checkmark.shield" : "exclamationmark.shield") : risk.systemImage,
-                    tint: isComplete ? (isApproved || canRun ? SafeRunTheme.safe : SafeRunTheme.caution) : risk.tint
+                    title: isExecuted ? "Completed" : (isExecuting ? "Executing…" : (isComplete ? (isApproved ? "Approved" : (canRun ? "Ready to Run" : "Needs Review")) : "\(actionCount) Actions · \(risk.title) Risk")),
+                    systemImage: isExecuted ? "checkmark.circle" : (isExecuting ? "arrow.triangle.2.circlepath" : (isComplete ? (isApproved || canRun ? "checkmark.shield" : "exclamationmark.shield") : risk.systemImage)),
+                    tint: isExecuted ? SafeRunTheme.safe : (isExecuting ? SafeRunTheme.accent : (isComplete ? (isApproved || canRun ? SafeRunTheme.safe : SafeRunTheme.caution) : risk.tint))
                 )
                 .safeRunGlassEffectID("plan-status", in: glassNamespace)
 
@@ -370,11 +377,11 @@ struct GlassActionBar: View {
                 GlassButton(
                     prominence: .prominent,
                     tint: isComplete ? SafeRunTheme.safe : SafeRunTheme.accent,
-                    isDisabled: isSimulating || isApproved || actionCount == 0 || (isComplete && !canRun),
+                    isDisabled: isSimulating || isExecuting || isExecuted || isApproved || actionCount == 0 || (isComplete && !canRun),
                     action: onPrimaryAction
                 ) {
                     HStack(spacing: 7) {
-                        if isSimulating {
+                        if isSimulating || isExecuting {
                             ProgressView()
                                 .controlSize(.small)
                         }
@@ -393,6 +400,7 @@ struct GlassActionBar: View {
             .safeRunGlassTransition()
         }
         .animation(reduceMotion ? nil : SafeRunMotion.gentle, value: isComplete)
+        .accessibilityValue(isExecuting ? "\(Int(executionProgress * 100)) percent complete" : primaryTitle)
     }
 }
 

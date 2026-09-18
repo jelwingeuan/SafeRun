@@ -9,7 +9,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: SafeRunSpacing.large) {
                 pageHeader(
                     eyebrow: "PREFERENCES",
                     title: "Settings",
@@ -17,28 +17,22 @@ struct SettingsView: View {
                     systemImage: "gearshape"
                 )
 
-                settingsCard(title: "General", symbol: "paintbrush", tint: SafeRunTheme.accent) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Appearance")
-                            .font(.callout.weight(.medium))
+                Form {
+                    Section("General") {
                         Picker("Appearance", selection: $appearanceMode) {
                             ForEach(AppearanceMode.allCases) { mode in
                                 Text(mode.title).tag(mode.rawValue)
                             }
                         }
-                        .pickerStyle(.segmented)
                         Text("SafeRun follows the system appearance by default.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                }
 
-                settingsCard(title: "Automation", symbol: "slider.horizontal.3", tint: SafeRunTheme.accent) {
-                    VStack(alignment: .leading, spacing: 12) {
+                    Section("Automation") {
                         Toggle("Require simulation before execution", isOn: $requireSimulation)
                         Toggle("Require confirmation for deletes", isOn: $confirmDeletes)
                         Toggle("Require confirmation for overwrites", isOn: $confirmOverwrites)
-                        Divider()
                         Stepper(value: $maximumAutomaticActions, in: 1...10_000, step: 10) {
                             HStack {
                                 Text("Maximum automatic actions")
@@ -49,58 +43,31 @@ struct SettingsView: View {
                             }
                         }
                     }
-                }
 
-                settingsCard(title: "Recovery", symbol: "externaldrive.badge.timemachine", tint: SafeRunTheme.safe) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        settingsValue("Recovery storage", value: "Managed locally")
+                    Section("Recovery") {
+                        LabeledContent("Recovery storage", value: "Managed locally")
                         Toggle("Automatically remove expired recovery data", isOn: .constant(false))
                             .disabled(true)
                         Text("Recovery storage will be enabled with the execution and rollback milestone. SafeRun never sends your files to an external service.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                }
 
-                settingsCard(title: "AI", symbol: "wand.and.stars", tint: SafeRunTheme.caution) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        settingsValue("Planner provider", value: "Mock planner")
-                        settingsValue("API configuration", value: "Not configured")
-                        Text("The current planner creates structured previews locally. A future AI provider can be connected without granting shell or terminal access.")
+                    Section("Planner") {
+                        LabeledContent("Planner provider", value: "Mock planner")
+                        LabeledContent("API configuration", value: "Not configured")
+                        Text("The current planner creates structured previews locally. A future provider can be connected without granting shell or terminal access.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: 760)
             }
-            .padding(.horizontal, 36)
-            .padding(.vertical, 34)
+            .padding(.horizontal, SafeRunSpacing.xLarge)
+            .padding(.vertical, SafeRunSpacing.xLarge)
             .frame(maxWidth: 860, alignment: .leading)
         }
-    }
-
-    private func settingsCard<Content: View>(
-        title: String,
-        symbol: String,
-        tint: Color,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        GlassCard(padding: 20, tint: tint.opacity(0.12)) {
-            VStack(alignment: .leading, spacing: 16) {
-                Label(title, systemImage: symbol)
-                    .font(.headline)
-                    .foregroundStyle(tint)
-                content()
-            }
-        }
-    }
-
-    private func settingsValue(_ title: String, value: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
-        }
-        .font(.callout)
     }
 }

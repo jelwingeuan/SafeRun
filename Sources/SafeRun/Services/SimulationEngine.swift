@@ -64,8 +64,8 @@ struct SimulationEngine: Sendable {
                     failed += 1
                     continue
                 }
-                if let existing = virtualEntries[destinationPath], !existing.isDirectory {
-                    conflicts.append("A file already exists where \(action.filename) should be created.")
+                if virtualEntries[destinationPath] != nil {
+                    conflicts.append("An item already exists where \(action.filename) should be created.")
                     failed += 1
                     continue
                 }
@@ -102,7 +102,7 @@ struct SimulationEngine: Sendable {
                 }
 
                 let current = virtualEntries[sourcePath]!
-                if action.type != .copyFile {
+                if action.type != .copyFile && action.type != .replaceFile {
                     virtualEntries[sourcePath] = nil
                 }
                 virtualEntries[destinationPath] = VirtualFileEntry(

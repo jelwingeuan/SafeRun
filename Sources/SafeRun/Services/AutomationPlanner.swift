@@ -33,7 +33,7 @@ struct MockAutomationPlanner: AutomationPlanner, Sendable {
                         type: .createDirectory,
                         destinationURL: destinationDirectory,
                         filename: categoryName,
-                        description: "Create the (categoryName) folder",
+                        description: "Create the \(categoryName) folder",
                         risk: .low,
                         isReversible: true
                     )
@@ -48,7 +48,7 @@ struct MockAutomationPlanner: AutomationPlanner, Sendable {
                         sourceURL: file.url,
                         destinationURL: destination,
                         filename: file.name,
-                        description: "Move (file.name) into (categoryName)",
+                        description: "Move \(file.name) into \(categoryName)",
                         risk: .medium,
                         isReversible: true
                     )
