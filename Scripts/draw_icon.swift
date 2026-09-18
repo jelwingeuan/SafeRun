@@ -1,6 +1,6 @@
 import AppKit
 
-// Original, deterministic artwork: a blue shield and a mint checkmark.
+// Minimal, deterministic SafeRun artwork: a cool shield and a cyan play mark.
 // Render every native icon representation; no downloaded assets or image service.
 let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 for points in [16, 32, 128, 256, 512] {
@@ -16,30 +16,28 @@ for points in [16, 32, 128, 256, 512] {
         let transform = AffineTransform(scale: CGFloat(pixels) / 1024)
         (transform as NSAffineTransform).concat()
         let tile = NSBezierPath(roundedRect: NSRect(x: 60, y: 60, width: 904, height: 904), xRadius: 205, yRadius: 205)
-        NSGradient(starting: NSColor(srgbRed: 0.08, green: 0.16, blue: 0.32, alpha: 1),
-                   ending: NSColor(srgbRed: 0.16, green: 0.48, blue: 0.88, alpha: 1))!.draw(in: tile, angle: 60)
+        NSColor(srgbRed: 0.075, green: 0.105, blue: 0.145, alpha: 1).setFill()
+        tile.fill()
+
         let shield = NSBezierPath()
-        shield.move(to: NSPoint(x: 512, y: 825))
-        shield.curve(to: NSPoint(x: 770, y: 730), controlPoint1: NSPoint(x: 620, y: 765), controlPoint2: NSPoint(x: 700, y: 745))
-        shield.line(to: NSPoint(x: 755, y: 490))
-        shield.curve(to: NSPoint(x: 512, y: 210), controlPoint1: NSPoint(x: 735, y: 350), controlPoint2: NSPoint(x: 630, y: 260))
-        shield.curve(to: NSPoint(x: 269, y: 490), controlPoint1: NSPoint(x: 394, y: 260), controlPoint2: NSPoint(x: 289, y: 350))
-        shield.line(to: NSPoint(x: 254, y: 730))
-        shield.curve(to: NSPoint(x: 512, y: 825), controlPoint1: NSPoint(x: 324, y: 745), controlPoint2: NSPoint(x: 404, y: 765))
+        shield.move(to: NSPoint(x: 512, y: 810))
+        shield.curve(to: NSPoint(x: 760, y: 700), controlPoint1: NSPoint(x: 620, y: 770), controlPoint2: NSPoint(x: 720, y: 735))
+        shield.line(to: NSPoint(x: 744, y: 470))
+        shield.curve(to: NSPoint(x: 512, y: 242), controlPoint1: NSPoint(x: 720, y: 360), controlPoint2: NSPoint(x: 620, y: 285))
+        shield.curve(to: NSPoint(x: 280, y: 470), controlPoint1: NSPoint(x: 404, y: 285), controlPoint2: NSPoint(x: 304, y: 360))
+        shield.line(to: NSPoint(x: 264, y: 700))
+        shield.curve(to: NSPoint(x: 512, y: 810), controlPoint1: NSPoint(x: 304, y: 735), controlPoint2: NSPoint(x: 404, y: 770))
         shield.close()
-        NSColor.white.withAlphaComponent(0.96).setStroke()
-        shield.lineWidth = 37
-        shield.lineJoinStyle = .round
-        shield.stroke()
-        let check = NSBezierPath()
-        check.move(to: NSPoint(x: 380, y: 532))
-        check.line(to: NSPoint(x: 479, y: 428))
-        check.line(to: NSPoint(x: 659, y: 633))
-        check.lineWidth = 64
-        check.lineCapStyle = .round
-        check.lineJoinStyle = .round
-        NSColor(srgbRed: 0.44, green: 0.98, blue: 0.79, alpha: 1).setStroke()
-        check.stroke()
+        NSColor(srgbRed: 0.66, green: 0.75, blue: 0.84, alpha: 1).setFill()
+        shield.fill()
+
+        let play = NSBezierPath()
+        play.move(to: NSPoint(x: 438, y: 390))
+        play.line(to: NSPoint(x: 438, y: 634))
+        play.line(to: NSPoint(x: 658, y: 512))
+        play.close()
+        NSColor(srgbRed: 0.08, green: 0.67, blue: 0.92, alpha: 1).setFill()
+        play.fill()
         NSGraphicsContext.restoreGraphicsState()
         let suffix = scale == 2 ? "@2x" : ""
         let output = directory.appendingPathComponent("icon_\(points)x\(points)\(suffix).png")
