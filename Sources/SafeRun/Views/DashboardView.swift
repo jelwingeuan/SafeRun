@@ -92,8 +92,7 @@ struct DashboardView: View {
                         Button("Cancel", action: viewModel.cancelPendingWork)
                     }
                 } else if let context = viewModel.folderContext {
-                    Text("\(context.fileEntries.count) files · \(context.entries.filter(\.isDirectory).count) folders · \(ByteCountFormatter.string(fromByteCount: context.fileEntries.reduce(0) { $0 + $1.byteSize }, countStyle: .file)) · Scanned \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption).foregroundStyle(.secondary)
+                    FolderScanSummary(context: context)
                     ForEach(context.scanWarnings ?? [], id: \.self) { warning in
                         Text(warning).font(.caption).foregroundStyle(.secondary)
                     }
@@ -219,6 +218,29 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+}
+
+private struct FolderScanSummary: View {
+    let context: FolderContext
+
+    private var totalBytes: Int64 {
+        context.fileEntries.reduce(0) { $0 + $1.byteSize }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("\(context.fileEntries.count) files")
+            Text("·")
+            Text("\(context.entries.filter(\.isDirectory).count) folders")
+            Text("·")
+            Text(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))
+            Text("·")
+            Text("Scanned")
+            Text(context.generatedAt, style: .time)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }
 
