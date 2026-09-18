@@ -11,6 +11,7 @@ The current milestone provides:
 - path safety checks, conflict-aware simulation, risk analysis, and real execution inside the selected folder;
 - explicit execution confirmation, recovery storage for deletes and replacements, automatic rollback on partial failure, and persistent rollback journals;
 - local JSON-backed simulation history;
+- sandbox-safe, persistent access to folders explicitly selected by the user, including after relaunch;
 - unit and temporary-folder integration tests for path validation, risk levels, simulation conflicts, planner output, real moves/deletes/replacements, and rollback behavior.
 
 ## Build and test

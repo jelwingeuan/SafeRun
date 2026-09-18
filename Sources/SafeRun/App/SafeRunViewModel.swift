@@ -29,7 +29,7 @@ final class SafeRunViewModel: ObservableObject {
     private let executionEngine = SafeExecutionEngine()
     private let historyStore = RunHistoryStore()
     private let rollbackStore = RollbackStore()
-    private var folderAccessURL: URL?
+    private let folderAccessStore = FolderAccessStore()
     private var scanTask: Task<Void, Never>?
 
     init() {
@@ -73,10 +73,27 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func acceptFolder(_ url: URL) {
+        do {
+            let accessibleURL = try folderAccessStore.grantAccess(to: url)
+            selectFolder(accessibleURL)
+        } catch {
+            errorMessage = SafeRunError.accessDenied(url).localizedDescription
+        }
+    }
+
+    func openSimulation(_ item: RunHistoryItem) {
+        do {
+            let accessibleURL = try folderAccessStore.restoreAccess(to: item.selectedDirectory)
+            selectFolder(accessibleURL)
+            instruction = item.instruction
+            selectedSection = .dashboard
+        } catch {
+            errorMessage = SafeRunError.accessDenied(item.selectedDirectory).localizedDescription
+        }
+    }
+
+    private func selectFolder(_ url: URL) {
         let normalizedURL = PathValidator.normalized(url)
-        folderAccessURL?.stopAccessingSecurityScopedResource()
-        folderAccessURL = normalizedURL
-        _ = normalizedURL.startAccessingSecurityScopedResource()
         selectedFolder = normalizedURL
         folderContext = nil
         plan = nil
@@ -155,12 +172,6 @@ final class SafeRunViewModel: ObservableObject {
             isSimulating = false
             await saveHistory(for: completedPlan, result: result)
         }
-    }
-
-    func openSimulation(_ item: RunHistoryItem) {
-        acceptFolder(item.selectedDirectory)
-        instruction = item.instruction
-        selectedSection = .dashboard
     }
 
     func selectAction(_ action: SafeRunAction) {
@@ -270,6 +281,7 @@ final class SafeRunViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
+                _ = try folderAccessStore.restoreAccess(to: journal.rootFolder)
                 try await executionEngine.rollback(journal)
                 try await rollbackStore.remove(journal.id)
                 rollbackJournals.removeAll { $0.id == journal.id }

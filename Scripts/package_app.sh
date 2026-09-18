@@ -176,21 +176,11 @@ chmod -R u+w "$APP"
 xattr -cr "$APP"
 find "$APP" -name '._*' -delete
 
-ENTITLEMENTS_DIR="$ROOT/.build/entitlements"
-DEFAULT_ENTITLEMENTS="$ENTITLEMENTS_DIR/${APP_NAME}.entitlements"
-mkdir -p "$ENTITLEMENTS_DIR"
-
+DEFAULT_ENTITLEMENTS="$ROOT/${APP_NAME}.entitlements"
 APP_ENTITLEMENTS=${APP_ENTITLEMENTS:-$DEFAULT_ENTITLEMENTS}
 if [[ ! -f "$APP_ENTITLEMENTS" ]]; then
-  cat > "$APP_ENTITLEMENTS" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <!-- Add entitlements here if needed. -->
-</dict>
-</plist>
-PLIST
+  echo "ERROR: Missing entitlements file: $APP_ENTITLEMENTS" >&2
+  exit 1
 fi
 
 if [[ "$SIGNING_MODE" == "adhoc" || -z "$APP_IDENTITY" ]]; then
@@ -217,5 +207,7 @@ sign_frameworks
 codesign "${CODESIGN_ARGS[@]}" \
   --entitlements "$APP_ENTITLEMENTS" \
   "$APP"
+
+codesign --verify --deep --strict --verbose=2 "$APP"
 
 echo "Created $APP"

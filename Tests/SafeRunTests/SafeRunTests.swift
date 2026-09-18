@@ -3,6 +3,89 @@ import XCTest
 @testable import SafeRun
 
 final class SafeRunTests: XCTestCase {
+    func testFolderAccessStorePersistsAndRestoresBookmarkForSelectedFolder() throws {
+        let root = try makeTemporaryFolder()
+        let suiteName = "SafeRunTests.Bookmarks.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let bookmark = Data("folder-bookmark".utf8)
+        let makeBookmark: FolderAccessStore.BookmarkFactory = { _ in bookmark }
+        let resolveBookmark: FolderAccessStore.BookmarkResolver = { data in
+            XCTAssertEqual(data, bookmark)
+            return .init(url: root, isStale: false, startedAccessing: false)
+        }
+
+        let selectingStore = FolderAccessStore(
+            defaults: defaults,
+            defaultsKey: "bookmarks",
+            bookmarkFactory: makeBookmark,
+            bookmarkResolver: resolveBookmark
+        )
+        XCTAssertEqual(try selectingStore.grantAccess(to: root), PathValidator.normalized(root))
+
+        let restoredStore = FolderAccessStore(
+            defaults: defaults,
+            defaultsKey: "bookmarks",
+            bookmarkFactory: makeBookmark,
+            bookmarkResolver: resolveBookmark
+        )
+        XCTAssertEqual(try restoredStore.restoreAccess(to: root), PathValidator.normalized(root))
+    }
+
+    func testFolderAccessStoreRefreshesStaleBookmark() throws {
+        let root = try makeTemporaryFolder()
+        let suiteName = "SafeRunTests.StaleBookmarks.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let originalBookmark = Data("original-bookmark".utf8)
+        let refreshedBookmark = Data("refreshed-bookmark".utf8)
+        let factory: FolderAccessStore.BookmarkFactory = { url in
+            PathValidator.normalized(url) == PathValidator.normalized(root) ? refreshedBookmark : originalBookmark
+        }
+        let initialResolver: FolderAccessStore.BookmarkResolver = { _ in
+            .init(url: root, isStale: false, startedAccessing: false)
+        }
+        let selectingStore = FolderAccessStore(
+            defaults: defaults,
+            defaultsKey: "bookmarks",
+            bookmarkFactory: { _ in originalBookmark },
+            bookmarkResolver: initialResolver
+        )
+        _ = try selectingStore.grantAccess(to: root)
+
+        var resolvedBookmark: Data?
+        let restoringStore = FolderAccessStore(
+            defaults: defaults,
+            defaultsKey: "bookmarks",
+            bookmarkFactory: factory,
+            bookmarkResolver: { data in
+                resolvedBookmark = data
+                return .init(url: root, isStale: true, startedAccessing: false)
+            }
+        )
+        _ = try restoringStore.restoreAccess(to: root)
+        XCTAssertEqual(resolvedBookmark, originalBookmark)
+
+        let verifyStore = FolderAccessStore(
+            defaults: defaults,
+            defaultsKey: "bookmarks",
+            bookmarkFactory: factory,
+            bookmarkResolver: { data in
+                XCTAssertEqual(data, refreshedBookmark)
+                return .init(url: root, isStale: false, startedAccessing: false)
+            }
+        )
+        _ = try verifyStore.restoreAccess(to: root)
+    }
+
     func testPathValidatorBlocksTraversalAndSiblingPrefix() {
         let root = URL(fileURLWithPath: "/tmp/SafeRun/Folder", isDirectory: true)
         XCTAssertTrue(PathValidator.isWithinRoot(root.appendingPathComponent("photo.jpg"), root: root))
