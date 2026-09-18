@@ -2,11 +2,12 @@ import SwiftUI
 
 @main
 struct SafeRunApp: App {
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var viewModel = SafeRunViewModel()
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             RootView()
                 .environmentObject(viewModel)
                 .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
@@ -16,12 +17,29 @@ struct SafeRunApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About \(SafeRunAbout.name)") { SafeRunAbout.showPanel() }
+            }
             CommandGroup(after: .newItem) {
                 Button("Choose Folder") {
                     viewModel.chooseFolder()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
+            CommandGroup(replacing: .help) {
+                Button("Welcome to SafeRun") {
+                    openWindow(id: "main")
+                    viewModel.isOnboardingPresented = true
+                }
+            }
+        }
+
+        Settings {
+            SettingsView()
+                .environmentObject(viewModel)
+                .preferredColorScheme(AppearanceMode(rawValue: appearanceMode)?.colorScheme)
+                .background { SafeRunAtmosphere() }
+                .frame(width: 760, height: 700)
         }
     }
 }

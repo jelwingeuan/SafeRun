@@ -53,6 +53,7 @@ struct CompletedRunsView: View {
 struct RollbacksView: View {
     @EnvironmentObject private var viewModel: SafeRunViewModel
     @State private var journalToRollback: RollbackJournal?
+    @State private var transactionToRecover: ExecutionTransaction?
 
     var body: some View {
         ScrollView {
@@ -64,6 +65,23 @@ struct RollbacksView: View {
                     systemImage: "arrow.uturn.backward.circle"
                 )
 
+                ForEach(viewModel.interruptedTransactions) { transaction in
+                    GlassCard(tint: SafeRunTheme.caution.opacity(0.12)) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("SafeRun detected an interrupted run.").font(.headline)
+                            Text(transaction.journal.rootFolder.path).font(.caption).textSelection(.enabled)
+                            if let failure = transaction.failure { Text(failure).font(.callout) }
+                            ForEach(transaction.entries, id: \.action.id) { entry in
+                                Text("\(entry.action.description) — \(entry.phase.rawValue)\(entry.failure.map { ": " + $0 } ?? "")")
+                                    .font(.caption).textSelection(.enabled)
+                            }
+                            Button("Attempt Recovery") { transactionToRecover = transaction }
+                                .disabled(viewModel.isBusy)
+                            Text("If access was revoked, choose this folder again before attempting recovery.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if viewModel.rollbackJournals.isEmpty {
                     GlassCard(padding: SafeRunSpacing.large, tint: SafeRunTheme.safe.opacity(0.10)) {
                         HStack(alignment: .top, spacing: SafeRunSpacing.medium) {
@@ -103,7 +121,7 @@ struct RollbacksView: View {
 
                                 GlassButton(
                                     tint: SafeRunTheme.caution,
-                                    isDisabled: viewModel.isRollingBack,
+                                    isDisabled: viewModel.isBusy,
                                     action: { journalToRollback = journal }
                                 ) {
                                     Label("Roll Back", systemImage: "arrow.uturn.backward")
@@ -128,6 +146,12 @@ struct RollbacksView: View {
             .padding(.horizontal, SafeRunSpacing.xLarge)
             .padding(.vertical, SafeRunSpacing.xLarge)
             .frame(maxWidth: SafeRunTheme.pageWidth, alignment: .leading)
+        }
+        .confirmationDialog("Attempt recovery?", item: $transactionToRecover, titleVisibility: .visible) { transaction in
+            Button("Attempt Recovery", role: .destructive) { viewModel.recoverInterruptedRun(transaction) }
+            Button("Cancel", role: .cancel) { }
+        } message: { _ in
+            Text("SafeRun will inspect the durable journal and undo changes it can verify. Changed or ambiguous items will be reported for manual inspection.")
         }
         .confirmationDialog(
             "Roll back this run?",

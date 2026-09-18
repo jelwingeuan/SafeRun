@@ -1,10 +1,18 @@
 import Foundation
 
 struct RollbackManager: Sendable {
+    let recoveryDirectory: URL
+
+    init(recoveryDirectory: URL? = nil) {
+        self.recoveryDirectory = recoveryDirectory ?? TransactionStore.defaultRecoveryDirectory
+    }
+
     func makeJournal(for plan: SafeRunPlan) -> RollbackJournal {
+        let journalID = UUID()
         let entries = plan.actions.map { action in
             let recoveryURL = action.type == .deleteFile || action.type == .replaceFile
-                ? recoveryURL(for: action)
+                ? recoveryDirectory.appendingPathComponent(journalID.uuidString, isDirectory: true)
+                    .appendingPathComponent(action.id.uuidString + ".backup")
                 : nil
             return RollbackJournalEntry(
                 id: UUID(),
@@ -14,7 +22,7 @@ struct RollbackManager: Sendable {
                 note: note(for: action)
             )
         }
-        return RollbackJournal(id: UUID(), planID: plan.id, rootFolder: plan.selectedRootFolder, createdAt: .now, entries: entries)
+        return RollbackJournal(id: journalID, planID: plan.id, rootFolder: plan.selectedRootFolder, createdAt: .now, entries: entries)
     }
 
     private func inverse(of action: SafeRunAction, recoveryURL: URL?) -> SafeRunAction? {
@@ -76,8 +84,7 @@ struct RollbackManager: Sendable {
     }
 
     func recoveryURL(for action: SafeRunAction) -> URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("SafeRun/Recovery", isDirectory: true)
+        recoveryDirectory
             .appendingPathComponent(action.id.uuidString, isDirectory: false)
     }
 

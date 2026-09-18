@@ -354,12 +354,12 @@ struct GlassActionBar: View {
         GlassEffectGroup(spacing: 14) {
             HStack(spacing: 14) {
                 if isComplete {
-                    GlassButton(action: onEditPlan) {
+                    GlassButton(isDisabled: isExecuting || isSimulating, action: onEditPlan) {
                         Label("Edit Plan", systemImage: "slider.horizontal.3")
                     }
                     .safeRunGlassEffectID("plan-secondary-action", in: glassNamespace)
                 } else {
-                    GlassButton(action: onCancel) {
+                    GlassButton(isDisabled: isExecuting || isSimulating, action: onCancel) {
                         Label("Cancel", systemImage: "xmark")
                     }
                     .safeRunGlassEffectID("plan-secondary-action", in: glassNamespace)

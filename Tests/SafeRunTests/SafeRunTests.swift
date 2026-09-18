@@ -171,8 +171,8 @@ final class SafeRunTests: XCTestCase {
 
         let result = await SimulationEngine().simulate(plan: plan, context: context)
         XCTAssertFalse(result.success)
-        XCTAssertEqual(result.actionsPassed, 2)
-        XCTAssertEqual(result.actionsFailed, 1)
+        XCTAssertEqual(result.actionsPassed, 0)
+        XCTAssertEqual(result.actionsFailed, 3)
         XCTAssertFalse(result.conflicts.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), "Simulation must not touch the real filesystem")
     }
@@ -203,21 +203,18 @@ final class SafeRunTests: XCTestCase {
         XCTAssertTrue(result.conflicts.contains { $0.contains("destination folder") })
     }
 
-    func testMockPlannerProducesStructuredActionsForFiles() async throws {
+    func testPlanValidatorCalculatesRiskIndependently() async throws {
         let root = try makeTemporaryFolder()
         defer { try? FileManager.default.removeItem(at: root) }
         try Data("image".utf8).write(to: root.appendingPathComponent("photo.png"))
         try Data("document".utf8).write(to: root.appendingPathComponent("invoice.pdf"))
         let context = try await FolderContextScanner().scan(root: root)
 
-        let plan = try await MockAutomationPlanner().generatePlan(
-            instruction: "Organize by file type",
-            folderContext: context
-        )
-        XCTAssertEqual(plan.status, .ready)
-        XCTAssertTrue(plan.actions.contains { $0.type == .createDirectory })
-        XCTAssertTrue(plan.actions.contains { $0.type == .moveFile && $0.filename == "photo.png" })
-        XCTAssertTrue(plan.actions.allSatisfy { $0.sourceURL.map { PathValidator.isWithinRoot($0, root: root) } ?? true })
+        let unsafeRiskClaim = SafeRunPlan(title: "Delete", originalInstruction: "Delete photo", selectedRootFolder: root,
+            actions: [SafeRunAction(type: .deleteFile, sourceURL: root.appendingPathComponent("photo.png"),
+                filename: "photo.png", description: "Remove photo", risk: .low, isReversible: true)])
+        let validated = try PlanValidator().validate(plan: unsafeRiskClaim, context: context)
+        XCTAssertEqual(validated.overallRisk, .high)
     }
 
     func testRollbackManagerGeneratesInverseMoveRenameAndCopyActions() {
@@ -291,7 +288,9 @@ final class SafeRunTests: XCTestCase {
         )
         XCTAssertTrue(simulation.canExecute)
 
-        let engine = SafeExecutionEngine()
+        let recovery = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: recovery) }
+        let engine = SafeExecutionEngine(recoveryDirectory: recovery)
         let report = try await engine.execute(plan: plan, simulation: simulation, userApproved: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
@@ -331,7 +330,9 @@ final class SafeRunTests: XCTestCase {
         )
         XCTAssertTrue(simulation.canExecute)
 
-        let engine = SafeExecutionEngine()
+        let recovery = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: recovery) }
+        let engine = SafeExecutionEngine(recoveryDirectory: recovery)
         let report = try await engine.execute(plan: plan, simulation: simulation, userApproved: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
         XCTAssertTrue(report.journal.entries.first?.recoveryURL.map { FileManager.default.fileExists(atPath: $0.path) } == true)
@@ -377,7 +378,9 @@ final class SafeRunTests: XCTestCase {
         )
         XCTAssertTrue(simulation.canExecute)
 
-        let engine = SafeExecutionEngine()
+        let recovery = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: recovery) }
+        let engine = SafeExecutionEngine(recoveryDirectory: recovery)
         let report = try await engine.execute(plan: plan, simulation: simulation, userApproved: true)
         XCTAssertEqual(try String(contentsOf: source), "new content")
         XCTAssertEqual(try String(contentsOf: destination), "new content")
@@ -432,11 +435,13 @@ final class SafeRunTests: XCTestCase {
         XCTAssertTrue(simulation.canExecute)
         try FileManager.default.removeItem(at: secondSource)
 
+        let recovery = try makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: recovery) }
         do {
-            _ = try await SafeExecutionEngine().execute(plan: plan, simulation: simulation, userApproved: true)
+            _ = try await SafeExecutionEngine(recoveryDirectory: recovery).execute(plan: plan, simulation: simulation, userApproved: true)
             XCTFail("Execution should fail when the filesystem changes after simulation.")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("rolled back"))
+            XCTAssertTrue(error is StalePlanError)
         }
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstSource.path))

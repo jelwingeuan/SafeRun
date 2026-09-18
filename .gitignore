@@ -1,3 +1,8 @@
 .build/
 SafeRun.app/
 Icon.icns
+dist/
+.DS_Store
+*.p12
+*.p8
+*.keychain-db

@@ -22,7 +22,7 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.clear)
             }
-            .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewStyle(.balanced)
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 235)
         }
         .toolbar {
@@ -84,6 +84,18 @@ struct RootView: View {
                 )
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 340)
             }
+        }
+        .sheet(isPresented: $viewModel.isOnboardingPresented) {
+            OnboardingView().environmentObject(viewModel)
+        }
+        .alert("Folder Changed Since Simulation", isPresented: Binding(
+            get: { !viewModel.changedPaths.isEmpty },
+            set: { if !$0 { viewModel.changedPaths = [] } }
+        )) {
+            Button("Simulate Again") { viewModel.changedPaths = []; viewModel.simulate() }
+            Button("Cancel", role: .cancel) { viewModel.changedPaths = [] }
+        } message: {
+            Text("These items changed. No stale plan will be run.\n" + viewModel.changedPaths.joined(separator: "\n"))
         }
         .alert("SafeRun", isPresented: Binding(
             get: { viewModel.errorMessage != nil },

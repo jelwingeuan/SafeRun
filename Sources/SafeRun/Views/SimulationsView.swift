@@ -86,12 +86,22 @@ struct PlanPreviewView: View {
                     )
 
                     OperationSummaryStrip(plan: plan, result: viewModel.simulationResult)
+                    if let rationale = plan.rationale, !rationale.isEmpty {
+                        Text(rationale).font(.callout).foregroundStyle(.secondary)
+                    }
+                    if viewModel.isSimulating {
+                        ProgressView("Validating and simulating actual operations", value: viewModel.simulationProgress)
+                        Button("Cancel Simulation", action: viewModel.cancelPendingWork)
+                    }
 
                     if viewModel.isExecuting {
                         executionProgress
                     }
 
                     if !plan.conflicts.isEmpty {
+                        ForEach(plan.conflicts, id: \.self) { conflict in
+                            Text(conflict).font(.callout).foregroundStyle(SafeRunTheme.danger)
+                        }
                         ConflictBanner(count: plan.conflicts.count) {
                             operationFilter = .conflicts
                             workspaceMode = .plan

@@ -143,10 +143,12 @@ struct SafeRunAction: Identifiable, Codable, Hashable, Sendable {
     let filename: String
     let description: String
     var risk: RiskLevel
-    let isReversible: Bool
+    var isReversible: Bool
     var validationStatus: ActionValidationStatus
     var conflictStatus: ConflictStatus
     var executionState: ActionExecutionState
+    var confidence: Double?
+    var proposedRisk: RiskLevel?
 
     init(
         id: UUID = UUID(),
@@ -159,7 +161,9 @@ struct SafeRunAction: Identifiable, Codable, Hashable, Sendable {
         isReversible: Bool,
         validationStatus: ActionValidationStatus = .pending,
         conflictStatus: ConflictStatus = .none,
-        executionState: ActionExecutionState = .pending
+        executionState: ActionExecutionState = .pending,
+        confidence: Double? = nil,
+        proposedRisk: RiskLevel? = nil
     ) {
         self.id = id
         self.type = type
@@ -172,6 +176,8 @@ struct SafeRunAction: Identifiable, Codable, Hashable, Sendable {
         self.validationStatus = validationStatus
         self.conflictStatus = conflictStatus
         self.executionState = executionState
+        self.confidence = confidence
+        self.proposedRisk = proposedRisk
     }
 }
 
@@ -185,6 +191,8 @@ struct SafeRunPlan: Identifiable, Codable, Hashable, Sendable {
     var conflicts: [String]
     var warnings: [String]
     var status: SafeRunPlanStatus
+    var rationale: String?
+    var estimatedRisk: RiskLevel?
 
     var totalOperations: Int { actions.count }
     var overallRisk: RiskLevel { actions.map(\.risk).max() ?? .low }
@@ -202,7 +210,9 @@ struct SafeRunPlan: Identifiable, Codable, Hashable, Sendable {
         actions: [SafeRunAction] = [],
         conflicts: [String] = [],
         warnings: [String] = [],
-        status: SafeRunPlanStatus = .draft
+        status: SafeRunPlanStatus = .draft,
+        rationale: String? = nil,
+        estimatedRisk: RiskLevel? = nil
     ) {
         self.id = id
         self.title = title
@@ -213,10 +223,12 @@ struct SafeRunPlan: Identifiable, Codable, Hashable, Sendable {
         self.conflicts = conflicts
         self.warnings = warnings
         self.status = status
+        self.rationale = rationale
+        self.estimatedRisk = estimatedRisk
     }
 }
 
-struct FolderEntry: Identifiable, Codable, Hashable {
+struct FolderEntry: Identifiable, Codable, Hashable, Sendable {
     let url: URL
     let relativePath: String
     let name: String
@@ -226,14 +238,17 @@ struct FolderEntry: Identifiable, Codable, Hashable {
     let modifiedAt: Date?
     let isDirectory: Bool
     let isSymbolicLink: Bool
+    var isAlias: Bool? = nil
+    var isPackage: Bool? = nil
 
     var id: String { url.standardizedFileURL.path }
 }
 
-struct FolderContext: Codable, Hashable {
+struct FolderContext: Codable, Hashable, Sendable {
     let rootFolder: URL
     let entries: [FolderEntry]
     let generatedAt: Date
+    var scanWarnings: [String]? = nil
 
     var fileEntries: [FolderEntry] { entries.filter { !$0.isDirectory } }
 
@@ -263,6 +278,7 @@ struct SimulationResult: Codable, Hashable, Sendable {
     let resultingVirtualFilesystem: [VirtualFileEntry]
     let overallRisk: RiskLevel
     let canExecute: Bool
+    var snapshot: FileSnapshot? = nil
 }
 
 struct RollbackJournalEntry: Codable, Hashable, Identifiable, Sendable {

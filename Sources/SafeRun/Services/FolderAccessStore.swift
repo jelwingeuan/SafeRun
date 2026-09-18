@@ -36,14 +36,17 @@ final class FolderAccessStore {
             var isStale = false
             let url = try URL(
                 resolvingBookmarkData: data,
-                options: [.withSecurityScope],
+                options: [.withSecurityScope, .withoutUI],
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )
+            guard url.startAccessingSecurityScopedResource() else {
+                throw SafeRunError.accessDenied(url)
+            }
             return ResolvedBookmark(
                 url: url,
                 isStale: isStale,
-                startedAccessing: url.startAccessingSecurityScopedResource()
+                startedAccessing: true
             )
         }
     }
@@ -66,6 +69,8 @@ final class FolderAccessStore {
 
     /// Saves a fresh bookmark for a folder selected through the system picker or drag and drop.
     func grantAccess(to url: URL) throws -> URL {
+        let started = url.startAccessingSecurityScopedResource()
+        defer { if started { url.stopAccessingSecurityScopedResource() } }
         let bookmark = try bookmarkFactory(url)
         return try activate(bookmark: bookmark, requestedURL: url)
     }
@@ -92,7 +97,8 @@ final class FolderAccessStore {
         let resolved = try bookmarkResolver(bookmark)
         let normalizedURL = PathValidator.normalized(resolved.url)
 
-        guard FileManager.default.fileExists(atPath: normalizedURL.path) else {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: normalizedURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             if resolved.startedAccessing {
                 resolved.url.stopAccessingSecurityScopedResource()
             }

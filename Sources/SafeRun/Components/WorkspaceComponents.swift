@@ -412,9 +412,11 @@ struct ActivityRow: View {
                     .foregroundStyle(item.rollbackAvailable ? SafeRunTheme.safe : SafeRunTheme.caution)
                     .frame(width: 24)
 
-                Text(item.selectedDirectory.lastPathComponent)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.selectedDirectory.lastPathComponent).font(.callout.weight(.medium))
+                    Text(item.result).font(.caption).foregroundStyle(.secondary)
+                }
+                    .lineLimit(2)
                     .frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
 
                 Text("\(item.operationCount) actions")

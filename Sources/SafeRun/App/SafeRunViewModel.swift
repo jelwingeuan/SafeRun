@@ -22,26 +22,53 @@ final class SafeRunViewModel: ObservableObject {
     @Published var rollbackJournals: [RollbackJournal] = []
     @Published var isRollingBack = false
     @Published var errorMessage: String?
+    @Published var hasAPIKey = false
+    @Published var maskedAPIKey = "Not connected"
+    @Published var connectionStatus = ""
+    @Published var isTestingConnection = false
+    @Published var isOnboardingPresented = !UserDefaults.standard.bool(forKey: "onboardingCompleted")
+    @Published var recoveryBytes: Int64 = 0
+    @Published var scannedEntries = 0
+    @Published var simulationProgress = 0.0
+    @Published var changedPaths: [String] = []
+    @Published var interruptedTransactions: [ExecutionTransaction] = []
 
     private let scanner = FolderContextScanner()
-    private let planner = MockAutomationPlanner()
+    private let apiKeyManager = APIKeyManager()
     private let simulationEngine = SimulationEngine()
     private let executionEngine = SafeExecutionEngine()
     private let historyStore = RunHistoryStore()
     private let rollbackStore = RollbackStore()
     private let folderAccessStore = FolderAccessStore()
     private var scanTask: Task<Void, Never>?
+    private var planningTask: Task<Void, Never>?
+    private var simulationTask: Task<Void, Never>?
 
     init() {
+        refreshAPIKeyStatus()
         Task { [weak self] in
             guard let self else { return }
             historyItems = await historyStore.load()
-            rollbackJournals = await rollbackStore.load()
+            await refreshRecovery()
         }
+    }
+
+    var isBusy: Bool { isScanning || isAnalyzing || isSimulating || isExecuting || isRollingBack }
+
+    private var actionLimit: Int {
+        let stored = UserDefaults.standard.integer(forKey: "maximumAutomaticActions")
+        return min(max(stored == 0 ? 100 : stored, 1), 500)
+    }
+
+    private var planner: OpenAIPlanner {
+        OpenAIPlanner(apiKeyManager: apiKeyManager,
+                      model: PlannerModel(rawValue: UserDefaults.standard.string(forKey: "plannerModel") ?? "") ?? .defaultModel,
+                      maximumActions: actionLimit)
     }
 
     var canAnalyze: Bool {
         folderContext != nil
+            && hasAPIKey && !isBusy
             && !isScanning
             && !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !isAnalyzing
@@ -53,6 +80,7 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func chooseFolder() {
+        guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -73,6 +101,7 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func acceptFolder(_ url: URL) {
+        guard !isBusy else { return }
         do {
             let accessibleURL = try folderAccessStore.grantAccess(to: url)
             selectFolder(accessibleURL)
@@ -82,6 +111,7 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func openSimulation(_ item: RunHistoryItem) {
+        guard !isBusy else { return }
         do {
             let accessibleURL = try folderAccessStore.restoreAccess(to: item.selectedDirectory)
             selectFolder(accessibleURL)
@@ -103,13 +133,18 @@ final class SafeRunViewModel: ObservableObject {
         errorMessage = nil
         scanTask?.cancel()
         isScanning = true
+        scannedEntries = 0
 
         scanTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let context = try await scanner.scan(root: normalizedURL)
+                let context = try await scanner.scan(root: normalizedURL) { [weak self] count in
+                    await self?.updateScanProgress(count)
+                }
+                try Task.checkCancellation()
                 folderContext = context
             } catch is CancellationError {
+                isScanning = false
                 return
             } catch {
                 errorMessage = error.localizedDescription
@@ -119,6 +154,12 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func analyze() {
+        guard !isBusy else { return }
+        guard hasAPIKey else {
+            selectedSection = .settings
+            errorMessage = "Connect AI to create your first SafeRun automation."
+            return
+        }
         guard let folderContext else {
             errorMessage = SafeRunError.folderNotFound.localizedDescription
             return
@@ -134,12 +175,17 @@ final class SafeRunViewModel: ObservableObject {
         selectedActionID = nil
         isActionInspectorPresented = false
 
-        Task { [weak self] in
+        planningTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let generatedPlan = try await planner.generatePlan(instruction: instruction, folderContext: folderContext)
+                try Task.checkCancellation()
                 plan = generatedPlan
                 selectedSection = .simulations
+                SafeRunLog.planner.info("Validated AI plan received")
+            } catch is CancellationError {
+                isAnalyzing = false
+                return
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -148,15 +194,27 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func simulate() {
-        guard var plan, let folderContext else { return }
+        guard !isBusy, var plan else { return }
         errorMessage = nil
+        changedPaths = []
+        simulationProgress = 0
+        simulationResult = nil
         isSimulating = true
         plan.status = .simulating
         self.plan = plan
 
-        Task { [weak self] in
+        simulationTask = Task { [weak self] in
             guard let self else { return }
-            let result = await simulationEngine.simulate(plan: plan, context: folderContext)
+            defer { isSimulating = false }
+            do {
+            try restoreExactAccess(to: plan.selectedRootFolder)
+            let context = try await scanner.scan(root: plan.selectedRootFolder)
+            _ = try PlanValidator().validate(plan: plan, context: context, maximumActions: actionLimit)
+            folderContext = context
+            let result = await simulationEngine.simulate(plan: plan, context: context) { [weak self] completed, total in
+                await self?.updateSimulationProgress(completed, total: total)
+            }
+            try Task.checkCancellation()
             simulationResult = result
             var completedPlan = plan
             completedPlan.status = .simulationComplete
@@ -164,13 +222,19 @@ final class SafeRunViewModel: ObservableObject {
             completedPlan.warnings = result.warnings
             completedPlan.actions = completedPlan.actions.map { action in
                 var action = action
-                action.validationStatus = result.conflicts.contains(where: { $0.localizedCaseInsensitiveContains(action.filename) }) ? .failed : .passed
+                action.validationStatus = result.success ? .passed : .failed
                 action.conflictStatus = action.validationStatus == .failed ? .unresolved : .none
                 return action
             }
             self.plan = completedPlan
             isSimulating = false
             await saveHistory(for: completedPlan, result: result)
+            } catch is CancellationError {
+                self.plan?.status = .ready
+            } catch {
+                self.plan?.status = .ready
+                errorMessage = "Simulation could not validate this plan. \(error.localizedDescription)"
+            }
         }
     }
 
@@ -180,6 +244,7 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func cancelCurrentPlan() {
+        guard !isBusy else { return }
         plan = nil
         simulationResult = nil
         selectedActionID = nil
@@ -188,6 +253,7 @@ final class SafeRunViewModel: ObservableObject {
     }
 
     func editCurrentPlan() {
+        guard !isBusy else { return }
         guard var plan else { return }
         plan.status = .ready
         plan.conflicts = []
@@ -203,9 +269,8 @@ final class SafeRunViewModel: ObservableObject {
 
     func executeCurrentPlan() {
         guard let plan, let simulationResult else { return }
-        guard !isExecuting else { return }
-        let maximumAutomaticActions = UserDefaults.standard.integer(forKey: "maximumAutomaticActions")
-        let actionLimit = maximumAutomaticActions > 0 ? maximumAutomaticActions : 100
+        guard !isBusy else { return }
+        guard plan.status != .completed, plan.status != .rolledBack else { return }
         guard plan.totalOperations <= actionLimit else {
             errorMessage = "This plan contains \(plan.totalOperations) actions, above the configured limit of \(actionLimit). Increase the limit in Settings or edit the plan."
             return
@@ -222,6 +287,7 @@ final class SafeRunViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
+                try restoreExactAccess(to: plan.selectedRootFolder)
                 let report = try await executionEngine.execute(
                     plan: plan,
                     simulation: simulationResult,
@@ -252,6 +318,12 @@ final class SafeRunViewModel: ObservableObject {
                 } catch {
                     self.errorMessage = "The files were changed successfully, but SafeRun could not save the rollback journal: \(error.localizedDescription)"
                 }
+            } catch let stale as StalePlanError {
+                isExecuting = false
+                self.simulationResult = nil
+                self.plan?.status = .ready
+                changedPaths = stale.changedPaths
+                executionStatus = "Folder Changed Since Simulation"
             } catch is CancellationError {
                 self.isExecuting = false
                 self.executionProgress = 0
@@ -263,25 +335,26 @@ final class SafeRunViewModel: ObservableObject {
             } catch {
                 self.isExecuting = false
                 self.executionProgress = 0
-                self.executionStatus = "Execution failed and was rolled back"
+                self.executionStatus = "Execution stopped — inspect recovery status"
                 if var currentPlan = self.plan {
                     currentPlan.status = .failed
                     self.plan = currentPlan
                 }
                 self.errorMessage = error.localizedDescription
             }
+            await refreshRecovery()
         }
     }
 
     func rollback(_ journal: RollbackJournal) {
-        guard !isRollingBack else { return }
+        guard !isBusy else { return }
         isRollingBack = true
         errorMessage = nil
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try folderAccessStore.restoreAccess(to: journal.rootFolder)
+                try restoreExactAccess(to: journal.rootFolder)
                 try await executionEngine.rollback(journal)
                 try await rollbackStore.remove(journal.id)
                 rollbackJournals.removeAll { $0.id == journal.id }
@@ -294,6 +367,139 @@ final class SafeRunViewModel: ObservableObject {
                 errorMessage = "SafeRun could not complete the rollback: \(error.localizedDescription)"
             }
             isRollingBack = false
+            await refreshRecovery()
+        }
+    }
+
+    func saveAPIKey(_ key: String) {
+        guard !isTestingConnection, !isAnalyzing else { return }
+        do {
+            if try apiKeyManager.retrieve() == nil { try apiKeyManager.save(key) }
+            else { try apiKeyManager.replace(key) }
+            refreshAPIKeyStatus()
+            connectionStatus = "Key saved in Keychain. Test Connection to check model access."
+        } catch { connectionStatus = error.localizedDescription }
+    }
+
+    func removeAPIKey() {
+        guard !isTestingConnection, !isAnalyzing else { return }
+        do {
+            try apiKeyManager.delete()
+            refreshAPIKeyStatus()
+            connectionStatus = "API key removed. History and rollback remain available."
+        } catch { connectionStatus = error.localizedDescription }
+    }
+
+    func testAIConnection() {
+        guard !isTestingConnection, hasAPIKey else { return }
+        isTestingConnection = true
+        let connectionPlanner = planner
+        Task {
+            defer { isTestingConnection = false }
+            do {
+                _ = try await connectionPlanner.checkConnection()
+                connectionStatus = "Connected. \(connectionPlanner.model.title) is available. This checks model access; generating plans uses your API billing and quota."
+            } catch is CancellationError {
+                connectionStatus = "Connection test cancelled."
+            } catch { connectionStatus = error.localizedDescription }
+        }
+    }
+
+    func finishOnboarding() {
+        UserDefaults.standard.set(true, forKey: "onboardingCompleted")
+        isOnboardingPresented = false
+    }
+
+    func cancelPendingWork() {
+        scanTask?.cancel()
+        planningTask?.cancel()
+        simulationTask?.cancel()
+    }
+
+    private func refreshAPIKeyStatus() {
+        do {
+            let key = try apiKeyManager.retrieve()
+            hasAPIKey = key != nil
+            maskedAPIKey = key.map { "sk-••••••••••••" + $0.suffix(4) } ?? "Not connected"
+        } catch {
+            hasAPIKey = false
+            connectionStatus = error.localizedDescription
+        }
+    }
+
+    private func restoreExactAccess(to root: URL) throws {
+        let resolved = try folderAccessStore.restoreAccess(to: root)
+        guard resolved.standardizedFileURL == root.standardizedFileURL else {
+            throw SafeRunError.planNotExecutable("The selected folder moved. Choose its new location and create a new plan. Existing recovery paths must be inspected before restoring.")
+        }
+    }
+
+    private func updateScanProgress(_ count: Int) { scannedEntries = count }
+    private func updateSimulationProgress(_ count: Int, total: Int) {
+        simulationProgress = total == 0 ? 1 : Double(count) / Double(total)
+    }
+
+    private func refreshRecovery() async {
+        do {
+            let durableJournals = try executionEngine.completedJournals()
+            for journal in durableJournals { try await rollbackStore.append(journal) }
+            rollbackJournals = try await rollbackStore.loadVerified()
+            interruptedTransactions = try executionEngine.discoverInterruptedTransactions()
+            for journal in durableJournals where !historyItems.contains(where: { $0.id == journal.planID }) {
+                let restored = RunHistoryItem(id: journal.planID, timestamp: journal.createdAt,
+                    instruction: "Recovered completed run", selectedDirectory: journal.rootFolder,
+                    operationCount: journal.entries.count, risk: .high,
+                    result: "Completed — recovered from transaction journal", rollbackAvailable: true)
+                try await historyStore.update(restored)
+            }
+            historyItems = await historyStore.load()
+            refreshRecoveryUsage()
+        } catch { errorMessage = "Recovery records could not be loaded. Keep SafeRun's recovery storage intact. \(error.localizedDescription)" }
+    }
+
+    func recoverInterruptedRun(_ transaction: ExecutionTransaction) {
+        guard !isBusy else { return }
+        isRollingBack = true
+        Task {
+            defer { isRollingBack = false }
+            do {
+                try restoreExactAccess(to: transaction.journal.rootFolder)
+                try await executionEngine.recover(transaction.id)
+                try await rollbackStore.remove(transaction.journal.id)
+                try await updateHistory(planID: transaction.journal.planID, result: "Interrupted run recovered", rollbackAvailable: false)
+            } catch { errorMessage = "Recovery needs attention. \(error.localizedDescription)" }
+            await refreshRecovery()
+        }
+    }
+
+    func refreshRecoveryUsage() {
+        Task { recoveryBytes = await RecoveryStorage.byteCount() }
+    }
+
+    func openRecoveryFolder() {
+        do {
+            let root = TransactionStore.defaultRecoveryDirectory
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(root)
+        } catch { errorMessage = "SafeRun could not open recovery storage. \(error.localizedDescription)" }
+    }
+
+    func clearExpiredRecoveryData() {
+        guard !isBusy else { return }
+        isRollingBack = true
+        Task {
+            defer { isRollingBack = false }
+            let storedDays = UserDefaults.standard.integer(forKey: "recoveryRetentionDays")
+            let days = min(max(storedDays == 0 ? 30 : storedDays, 1), 365)
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+            do {
+                let removed = try executionEngine.cleanupCompletedTransactions(olderThan: cutoff)
+                for journal in rollbackJournals where removed.contains(journal.id) {
+                    try await rollbackStore.remove(journal.id)
+                    try await updateHistory(planID: journal.planID, result: "Recovery expired", rollbackAvailable: false)
+                }
+                await refreshRecovery()
+            } catch { errorMessage = "Expired recovery data could not be cleared. \(error.localizedDescription)" }
         }
     }
 

@@ -8,6 +8,22 @@ struct DashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: SafeRunSpacing.xLarge) {
                 dashboardHeading
+                if !viewModel.interruptedTransactions.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("SafeRun detected an interrupted run.", systemImage: "exclamationmark.triangle")
+                        Text("Inspect the recovery journal before attempting restoration. SafeRun will not resume execution automatically.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Button("Inspect") { viewModel.selectedSection = .rollbacks }
+                    }
+                    .padding().background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                }
+                if !viewModel.hasAPIKey {
+                    HStack {
+                        Text("Connect AI to create your first SafeRun automation.")
+                        Spacer()
+                        Button("Set Up AI") { viewModel.selectedSection = .settings }
+                    }
+                }
                 commandConsole
                 recentSimulations
             }
@@ -68,6 +84,25 @@ struct DashboardView: View {
                     onChoose: viewModel.chooseFolder,
                     onDropFolder: viewModel.acceptDroppedFolder
                 )
+                .disabled(viewModel.isBusy)
+                if viewModel.isScanning {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Scanned \(viewModel.scannedEntries) items")
+                        Button("Cancel", action: viewModel.cancelPendingWork)
+                    }
+                } else if let context = viewModel.folderContext {
+                    Text("\(context.fileEntries.count) files · \(context.entries.filter(\.isDirectory).count) folders · \(ByteCountFormatter.string(fromByteCount: context.fileEntries.reduce(0) { $0 + $1.byteSize }, countStyle: .file)) · Scanned \(context.generatedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(context.scanWarnings ?? [], id: \.self) { warning in
+                        Text(warning).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Analyze sends your instruction and folder metadata—including filenames—to OpenAI. File contents are never uploaded.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if viewModel.isAnalyzing {
+                    Button("Cancel AI Request", action: viewModel.cancelPendingWork)
+                }
 
                 HStack(spacing: SafeRunSpacing.medium) {
                     Label(
@@ -93,7 +128,7 @@ struct DashboardView: View {
                         }
                     }
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .help("Create a reviewable simulation from this instruction")
+                    .help(viewModel.hasAPIKey ? "Send metadata to OpenAI and create a reviewable plan" : "Connect AI in Settings before analyzing")
                 }
             }
         }
@@ -117,7 +152,7 @@ struct DashboardView: View {
                 }
 
             if viewModel.instruction.isEmpty {
-                Text("Organize this folder by file type and move duplicates into a Duplicates folder.")
+                Text("Describe how you want to organize the selected folder.")
                     .font(.body)
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, SafeRunSpacing.medium)
