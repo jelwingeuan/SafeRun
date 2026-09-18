@@ -9,10 +9,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "SafeRun",
-            path: "Sources/SafeRun",
-            resources: [
-                .process("Resources")
-            ]
+            path: "Sources/SafeRun"
         ),
         .testTarget(
             name: "SafeRunTests",
