@@ -72,10 +72,7 @@ struct RollbacksView: View {
                             Text(transaction.journal.rootFolder.path).font(.caption).textSelection(.enabled)
                             if let failure = transaction.failure { Text(failure).font(.callout) }
                             ForEach(transaction.entries, id: \.action.id) { entry in
-                                let failureSuffix = entry.failure.map { ": \($0)" } ?? ""
-                                let entrySummary = "\(entry.action.description) — \(entry.phase.rawValue)\(failureSuffix)"
-                                Text(entrySummary)
-                                    .font(.caption).textSelection(.enabled)
+                                RecoveryEntrySummary(entry: entry)
                             }
                             Button("Attempt Recovery") { transactionToRecover = transaction }
                                 .disabled(viewModel.isBusy)
@@ -167,5 +164,23 @@ struct RollbacksView: View {
         } message: { journal in
             Text("SafeRun will restore the saved recovery entries inside \(journal.rootFolder.lastPathComponent).")
         }
+    }
+}
+
+private struct RecoveryEntrySummary: View {
+    let entry: ExecutionTransaction.Entry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.action.description)
+            Text(entry.phase.rawValue)
+                .foregroundStyle(.secondary)
+            if let failure = entry.failure {
+                Text(failure)
+                    .foregroundStyle(SafeRunTheme.danger)
+            }
+        }
+        .font(.caption)
+        .textSelection(.enabled)
     }
 }
